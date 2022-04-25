@@ -651,6 +651,12 @@ determine the ABI number. You may set this to force a given ABI number.]=] FORCE
 
 ##########################################################################
 
+set(RACINE_INSTALLATION ${CMAKE_INSTALL_PREFIX}/kuri/modules/OpenVDB/lib/x86_64-linux-gnu/)
+
+set(CMAKE_INSTALL_BINDIR ${RACINE_INSTALLATION}/bin)
+set(CMAKE_INSTALL_LIBDIR ${RACINE_INSTALLATION})
+set(CMAKE_INSTALL_INCLUDEDIR ${RACINE_INSTALLATION}/include)
+
 if(OPENVDB_BUILD_CORE)
   add_subdirectory(openvdb/openvdb)
 endif()
