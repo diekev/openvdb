@@ -708,3 +708,25 @@ if(OPENVDB_ENABLE_UNINSTALL)
     COMMAND ${CMAKE_COMMAND} -P ${PROJECT_SOURCE_DIR}/cmake/Uninstall.cmake
   )
 endif()
+
+##########################################################################
+
+set(NOM_PROJET module_c_openvdb)
+
+set(INCLUSIONS
+        ${CMAKE_CURRENT_SOURCE_DIR}/../../
+        ${CMAKE_CURRENT_SOURCE_DIR}/openvdb/
+)
+
+set(BIBLIOTHEQUES
+)
+
+set(SOURCES
+    openvdb_kuri/ipa_openvdb.cc
+
+    openvdb_kuri/ipa_openvdb.h
+
+    ${CMAKE_CURRENT_SOURCE_DIR}/../InterfaceCKuri/contexte_kuri.hh
+)
+
+compile_module_c(${NOM_PROJET} openvdb_kuri ipa_openvdb.h OPENVDB "${SOURCES}" "${INCLUSIONS}" "${BIBLIOTHEQUES}")
