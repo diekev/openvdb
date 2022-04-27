@@ -32,6 +32,33 @@ using namespace openvdb::OPENVDB_VERSION_NAME;
 struct VDBGrid {
 };
 
+struct InterruptriceVDB {
+    Interruptrice *interruptrice = nullptr;
+
+    void start(const char *name = nullptr)
+    {
+        if (interruptrice && interruptrice->commence) {
+            interruptrice->commence(interruptrice->donnees, name);
+        }
+    }
+
+    void end()
+    {
+        if (interruptrice && interruptrice->termine) {
+            interruptrice->termine(interruptrice->donnees);
+        }
+    }
+
+    bool wasInterrupted(int percent = -1)
+    {
+        if (interruptrice && interruptrice->doit_interrompre) {
+            return interruptrice->doit_interrompre(interruptrice->donnees, percent);
+        }
+
+        return false;
+    }
+};
+
 // interface pour OpenVDB
 class AdaptriceMaillageVDB : public AdaptriceMaillage {
   public:
@@ -60,17 +87,191 @@ class AdaptriceMaillageVDB : public AdaptriceMaillage {
         pos.y() = y;
         pos.z() = z;
     }
+
+    math::Vec3d getPoint(long n) const
+    {
+        float x, y, z;
+        this->point_pour_index(this->donnees, static_cast<long>(n), &x, &y, &z);
+        math::Vec3d pos;
+        pos.x() = x;
+        pos.y() = y;
+        pos.z() = z;
+        return pos;
+    }
+
+    void indexSommetsPolygone(long n, int *index) const
+    {
+        this->index_points_sommets_polygone(this->donnees, n, index);
+    }
+
+    void rafinePolygone(long i, const RafineusePolygone &rafineuse) const
+    {
+        this->rafine_polygone(this->donnees, i, &rafineuse);
+    }
 };
 
-VDBGrid *VDB_depuis_polygones(AdaptriceMaillage *adaptrice)
-{
-    AdaptriceMaillageVDB adaptrice_vdb = AdaptriceMaillageVDB{*adaptrice};
-    math::Transform transform;
-    float exterior_bandwidth = 3.0f;
-    float interiorBandWidth = 3.0f;
-    int flags = 0;
+#if 0
+enum DrapeauxVDBDepuisMaillage {
+    CHAMPS_DISTANCE_ABSOLUE = 1,
+    DESACTIVE_SUPPRESSION_VOXELS_INTERSECTANT = 2,
+    DESACTIVE_RENORMALISATION = 4,
+    DESACTIVE_ELAGAGE_LIMITES_BANDE = 8,
+};
+#endif
 
-    tools::meshToVolume(adaptrice_vdb, transform, exterior_bandwidth, interiorBandWidth, flags);
+struct ParametresVDBDepuisMaillage {
+    float taille_voxel;
+    float bande_exterieure;
+    float bande_interieure;
+    bool transfere_attributs;
+    bool construit_champs_distance;
+    bool champs_distance_absolue;
+    bool remplis_interieur_volume;
+};
+
+static std::vector<Vec3s> extrait_points(const AdaptriceMaillageVDB &adaptrice_vdb,
+                                         const math::Transform &transform)
+{
+    std::vector<Vec3s> resultat;
+    const long nombre_de_points = adaptrice_vdb.pointCount();
+
+    if (nombre_de_points == 0) {
+        return resultat;
+    }
+
+    resultat.reserve(nombre_de_points);
+
+    for (int i = 0; i < nombre_de_points; i++) {
+        Vec3d point = adaptrice_vdb.getPoint(i);
+        point = transform.worldToIndex(point);
+        resultat.push_back(point);
+    }
+
+    return resultat;
+}
+
+static std::vector<Vec4I> extrait_quads_et_triangles(const AdaptriceMaillageVDB &adaptrice_vdb)
+{
+    std::vector<Vec4I> resultat;
+    const long nombre_de_primitives = adaptrice_vdb.polygonCount();
+
+    if (nombre_de_primitives == 0) {
+        return resultat;
+    }
+
+    resultat.reserve(nombre_de_primitives);
+
+    RafineusePolygone rafineuse;
+    rafineuse.donnees = &resultat;
+    rafineuse.ajoute_triangle = [](RafineusePolygone *raf, long v0, long v1, long v2) {
+        Vec4I triangle;
+        triangle.x() = static_cast<int>(v0);
+        triangle.y() = static_cast<int>(v1);
+        triangle.z() = static_cast<int>(v2);
+        triangle.w() = util::INVALID_IDX;
+        static_cast<std::vector<Vec4I> *>(raf->donnees)->push_back(triangle);
+    };
+    rafineuse.ajoute_quadrilatere =
+        [](RafineusePolygone *raf, long v0, long v1, long v2, long v3) {
+            Vec4I triangle;
+            triangle.x() = static_cast<int>(v0);
+            triangle.y() = static_cast<int>(v1);
+            triangle.z() = static_cast<int>(v2);
+            triangle.w() = static_cast<int>(v3);
+            static_cast<std::vector<Vec4I> *>(raf->donnees)->push_back(triangle);
+        };
+
+    for (int i = 0; i < nombre_de_primitives; i++) {
+        const long nombre_de_sommets = adaptrice_vdb.vertexCount(i);
+
+        if (nombre_de_sommets == 3) {
+            int index[3];
+            adaptrice_vdb.indexSommetsPolygone(i, index);
+            Vec4I triangle;
+            triangle.x() = index[0];
+            triangle.y() = index[1];
+            triangle.z() = index[2];
+            triangle.w() = util::INVALID_IDX;
+            resultat.push_back(triangle);
+        }
+        else if (nombre_de_sommets == 4) {
+            int index[4];
+            adaptrice_vdb.indexSommetsPolygone(i, index);
+            Vec4I quad;
+            quad.x() = index[0];
+            quad.y() = index[1];
+            quad.z() = index[2];
+            quad.w() = index[3];
+            resultat.push_back(quad);
+        }
+        else if (nombre_de_sommets > 4) {
+            if (!adaptrice_vdb.rafine_polygone) {
+                continue;
+            }
+
+            adaptrice_vdb.rafinePolygone(i, rafineuse);
+        }
+    }
+
+    return resultat;
+}
+
+VDBGrid *VDB_depuis_polygones(AdaptriceMaillage *adaptrice,
+                              ParametresVDBDepuisMaillage *params,
+                              Interruptrice *interruptrice)
+{
+    InterruptriceVDB boss{interruptrice};
+    AdaptriceMaillageVDB adaptrice_vdb = AdaptriceMaillageVDB{*adaptrice};
+    math::Transform::Ptr transform = math::Transform::createLinearTransform(params->taille_voxel);
+
+    std::vector<Vec3s> pointList = extrait_points(adaptrice_vdb, *transform);
+    std::vector<Vec4I> primList = extrait_quads_et_triangles(adaptrice_vdb);
+
+    tools::QuadAndTriangleDataAdapter<Vec3s, Vec4I> mesh(pointList, primList);
+
+    /* Grille d'index pour les attributs. */
+    Int32Grid::Ptr grille_index;
+    if (params->transfere_attributs) {
+        grille_index.reset(new Int32Grid(0));
+    }
+
+    int drapeaux = params->champs_distance_absolue ? tools::UNSIGNED_DISTANCE_FIELD : 0;
+
+    FloatGrid::Ptr grille = tools::meshToVolume(boss,
+                                                mesh,
+                                                *transform,
+                                                params->bande_exterieure,
+                                                params->bande_interieure,
+                                                drapeaux,
+                                                grille_index.get());
+
+    if (!boss.wasInterrupted() && params->construit_champs_distance) {
+        // À FAIREhvdb::createVdbPrimitive(*gdp, grid, evalStdString("distancename",
+        // time).c_str());
+    }
+
+    if (!boss.wasInterrupted() && params->remplis_interieur_volume &&
+        !params->champs_distance_absolue) {
+        // If no level set grid is exported the original level set
+        // grid is modified in place.
+        FloatGrid::Ptr grille_fog;
+
+        if (params->construit_champs_distance) {
+            grille_fog = grille->deepCopy();
+        }
+        else {
+            grille_fog = grille;
+        }
+
+        tools::sdfToFogVolume(*grille_fog);
+
+        // À FAIRE hvdb::createVdbPrimitive(*gdp, outputGrid, evalStdString("fogname",
+        // time).c_str());
+    }
+
+    if (!boss.wasInterrupted() && params->transfere_attributs) {
+        // À FAIRE
+    }
 }
 
 struct ListeParticules : public AdaptricePoints {
@@ -157,33 +358,6 @@ struct ParamsVDBDepuisParticules {
     bool transfere_attributs;
 
     AccesseuseAttribut *acces_attributs_points;
-};
-
-struct InterruptriceVDB {
-    Interruptrice *interruptrice = nullptr;
-
-    void start(const char *name = nullptr)
-    {
-        if (interruptrice && interruptrice->commence) {
-            interruptrice->commence(interruptrice->donnees, name);
-        }
-    }
-
-    void end()
-    {
-        if (interruptrice && interruptrice->termine) {
-            interruptrice->termine(interruptrice->donnees);
-        }
-    }
-
-    bool wasInterrupted(int percent = -1)
-    {
-        if (interruptrice && interruptrice->doit_interrompre) {
-            return interruptrice->doit_interrompre(interruptrice->donnees, percent);
-        }
-
-        return false;
-    }
 };
 
 VDBGrid *VDB_depuis_particules(AdaptricePoints *adaptrice,
