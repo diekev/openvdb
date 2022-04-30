@@ -25,12 +25,31 @@
 #include "ipa_openvdb.h"
 
 #include "openvdb/tools/LevelSetUtil.h"
+#include "openvdb/tools/Mask.h"  // pour tools::interiorMask()
 #include "openvdb/tools/MeshToVolume.h"
 #include "openvdb/tools/ParticlesToLevelSet.h"
+#include "openvdb/tools/VolumeToMesh.h"
 
 #include "../InterfaceCKuri/contexte_kuri.hh"
 
 using namespace openvdb::OPENVDB_VERSION_NAME;
+
+/* *********************************************************************** */
+
+// Grid type lists, for use with GEO_PrimVDB::apply(), GEOvdbApply(),
+// or openvdb::GridBase::apply()
+
+using ScalarGridTypes = openvdb::TypeList<openvdb::BoolGrid,
+                                          openvdb::FloatGrid,
+                                          openvdb::DoubleGrid,
+                                          openvdb::Int32Grid,
+                                          openvdb::Int64Grid>;
+
+using PointGridTypes = openvdb::TypeList<openvdb::points::PointDataGrid>;
+
+using VolumeGridTypes = ScalarGridTypes::Append<Vec3GridTypes>;
+
+using AllGridTypes = VolumeGridTypes::Append<PointGridTypes>;
 
 /* *********************************************************************** */
 
@@ -443,6 +462,16 @@ static EnveloppeContexteEvaluationVDB enveloppe(ContexteEvaluationVDB *ctx)
     return {*ctx};
 }
 
+static std::string chaine_depuis_accesseuse(AccesseuseChaine *accesseuse)
+{
+    char *nom = nullptr;
+    long taille = 0;
+    if (accesseuse->accede_chaine) {
+        accesseuse->accede_chaine(accesseuse->donnees, &nom, &taille);
+    }
+    return std::string(nom, static_cast<size_t>(taille));
+}
+
 static void VDB_depuis_polygones_impl(ContexteKuri *ctx,
                                       EnveloppeContexteEvaluationVDB &ctx_eval_,
                                       ParametresVDBDepuisMaillage *params,
@@ -517,7 +546,8 @@ static void VDB_depuis_polygones_impl(ContexteKuri *ctx,
         boss, mesh, *transform, bande_exterieure, bande_interieure, drapeaux, grille_index.get());
 
     if (!boss.wasInterrupted() && params->genere_champs_de_distance) {
-        exporte_grille_vdb(ctx, exportrice, grille, params->nom_champs_distance);
+        exporte_grille_vdb(
+            ctx, exportrice, grille, chaine_depuis_accesseuse(params->nom_champs_distance));
     }
 
     if (params->genere_volume_dense && params->champs_distance_absolue) {
@@ -538,7 +568,8 @@ static void VDB_depuis_polygones_impl(ContexteKuri *ctx,
 
         tools::sdfToFogVolume(*grille_fog);
 
-        exporte_grille_vdb(ctx, exportrice, grille_fog, params->nom_volume_dense);
+        exporte_grille_vdb(
+            ctx, exportrice, grille_fog, chaine_depuis_accesseuse(params->nom_volume_dense));
     }
 
     if (!boss.wasInterrupted() && params->transfere_attributs) {
@@ -563,6 +594,454 @@ void VDB_depuis_polygones(ContexteKuri *ctx,
 
     try {
         VDB_depuis_polygones_impl(ctx, ctx_eval_, params, exportrice, boss);
+    }
+    catch (std::exception &e) {
+        ctx_eval_.rapporteErreur(e.what());
+    }
+}
+
+static std::vector<GrilleVDB *> grilles_depuis_iteratrice(IteratriceGrillesVDB &iteratrice)
+{
+    std::vector<GrilleVDB *> resultat;
+
+    auto grille = iteratrice.suivante(iteratrice.donnees_utilisateur);
+    while (grille) {
+        resultat.push_back(grille);
+        grille = iteratrice.suivante(iteratrice.donnees_utilisateur);
+    }
+
+    return resultat;
+}
+
+struct InteriorMaskOp {
+    InteriorMaskOp(double iso = 0.0) : inIsovalue(iso)
+    {
+    }
+
+    template <typename GridType>
+    void operator()(const GridType &grid)
+    {
+        outGridPtr = openvdb::tools::interiorMask(grid, inIsovalue);
+    }
+
+    const double inIsovalue;
+    openvdb::BoolGrid::Ptr outGridPtr;
+};
+
+// Extract a boolean mask from a grid of any type.
+inline GridBase::ConstPtr getMaskFromGrid(const GridBase::ConstPtr &gridPtr, double isovalue = 0.0)
+{
+    if (!gridPtr) {
+        return nullptr;
+    }
+
+    if (gridPtr->isType<openvdb::BoolGrid>()) {
+        // If the input grid is already boolean, return it.
+        return gridPtr;
+    }
+
+    InteriorMaskOp op{isovalue};
+    gridPtr->apply<AllGridTypes>(op);
+    return op.outGridPtr;
+}
+
+static void ajoute_masque_surface(EnveloppeContexteEvaluationVDB &ctx_eval,
+                                  ParametresVDBVersMaillage *params,
+                                  tools::VolumeToMesh &mesher)
+{
+    if (!params->grille_masque_surface) {
+        return;
+    }
+
+    if (!params->grille_masque_surface->grid) {
+        ctx_eval.rapporteAvertissement("Aucune grille pour le masque de surface");
+        return;
+    }
+
+    auto grille_masque = getMaskFromGrid(params->grille_masque_surface->grid,
+                                         params->decalage_masque);
+
+    mesher.setSurfaceMask(grille_masque, params->inverse_masque);
+}
+
+static void ajoute_champs_adaptivite(EnveloppeContexteEvaluationVDB &ctx_eval,
+                                     ParametresVDBVersMaillage *params,
+                                     tools::VolumeToMesh &mesher)
+{
+    if (!params->grille_champs_adaptivite) {
+        return;
+    }
+
+    if (!params->grille_champs_adaptivite->grid) {
+        ctx_eval.rapporteAvertissement("Aucune grille pour le masque de surface");
+        return;
+    }
+
+    if (VDB_type_volume_pour_grille(params->grille_champs_adaptivite) != TypeVolume::R32) {
+        ctx_eval.rapporteAvertissement("La grille du champs d'adaptivité n'est pas de type réel");
+        return;
+    }
+
+    auto grille = gridConstPtrCast<FloatGrid>(params->grille_champs_adaptivite->grid);
+    mesher.setSpatialAdaptivity(grille);
+}
+
+struct EnveloppeExportriceMaillage : public ExportriceMaillage {
+    static EnveloppeExportriceMaillage enveloppe(ExportriceMaillage &exportrice)
+    {
+        return {exportrice};
+    }
+
+    void ajoutePoints(float *points, long nombre) const
+    {
+        if (this->ajoute_plusieurs_points) {
+            this->ajoute_plusieurs_points(this->donnees_utilisateurs, points, nombre);
+            return;
+        }
+
+        reserveNombreDePoints(nombre);
+
+        for (int i = 0; i < nombre; i++) {
+            ajouteUnPoint(points[0], points[1], points[2]);
+            points += 3;
+        }
+    }
+
+    void reserveNombreDePoints(long nombre) const
+    {
+        this->reserve_nombre_de_points(this->donnees_utilisateurs, nombre);
+    }
+
+    void reserveNombreDePolygones(long nombre) const
+    {
+        this->reserve_nombre_de_polygones(this->donnees_utilisateurs, nombre);
+    }
+
+    void ajouteUnPoint(float x, float y, float z) const
+    {
+        this->ajoute_un_point(this->donnees_utilisateurs, x, y, z);
+    }
+
+    void ajouteListePolygones(int *sommets, int *sommets_par_polygones, long nombre_polygones)
+    {
+        this->ajoute_liste_polygones(
+            this->donnees_utilisateurs, sommets, sommets_par_polygones, nombre_polygones);
+    }
+
+    void ajouteUnPolygone(int *sommets, int taille) const
+    {
+        this->ajoute_un_polygone(this->donnees_utilisateurs, sommets, taille);
+    }
+
+    void *creeUnGroupeDePoints(const std::string &nom) const
+    {
+        return this->cree_un_groupe_de_points(
+            this->donnees_utilisateurs, nom.c_str(), static_cast<long>(nom.size()));
+    }
+
+    void *creeUnGroupeDePolygones(const std::string &nom) const
+    {
+        return this->cree_un_groupe_de_polygones(
+            this->donnees_utilisateurs, nom.c_str(), static_cast<long>(nom.size()));
+    }
+
+    void ajouteAuGroupe(void *poignee_groupe, long index) const
+    {
+        this->ajoute_au_groupe(poignee_groupe, index);
+    }
+
+    void ajoutePlageAuGroupe(void *poignee_groupe, long index_debut, long index_fin) const
+    {
+        this->ajoute_plage_au_groupe(poignee_groupe, index_debut, index_fin);
+    }
+};
+
+struct EnveloppeFluxSortieMaillage : public FluxSortieMaillage {
+  public:
+    static EnveloppeFluxSortieMaillage enveloppe(FluxSortieMaillage &flux)
+    {
+        return {flux};
+    }
+
+    EnveloppeExportriceMaillage creeUnMaillage()
+    {
+        ExportriceMaillage exportrice{};
+        this->cree_un_maillage(this->donnees_utilisateurs, &exportrice);
+        return EnveloppeExportriceMaillage::enveloppe(exportrice);
+    }
+};
+
+void copyMesh(EnveloppeFluxSortieMaillage &flux_sortie_maillages,
+              tools::VolumeToMesh &mesher,
+              const char *gridName)
+{
+    /* Exporte les points. */
+    const openvdb::tools::PointList &points = mesher.pointList();
+
+    auto maillage = flux_sortie_maillages.creeUnMaillage();
+    maillage.ajoutePoints(reinterpret_cast<float *>(points.get()),
+                          static_cast<long>(mesher.pointListSize()));
+
+    if (mesher.pointFlags().size() == mesher.pointListSize()) {
+        void *groupe_points_sur_couture = maillage.creeUnGroupeDePoints("points_couture");
+        if (groupe_points_sur_couture) {
+            for (int i = 0; i < mesher.pointListSize(); i++) {
+                if (mesher.pointFlags()[i]) {
+                    maillage.ajouteAuGroupe(groupe_points_sur_couture, i);
+                }
+            }
+        }
+    }
+
+    /* Exporte les polygones. */
+    openvdb::tools::PolygonPoolList &polygonPoolList = mesher.polygonPoolList();
+
+    const char exteriorFlag = char(openvdb::tools::POLYFLAG_EXTERIOR);
+    const char seamLineFlag = char(openvdb::tools::POLYFLAG_FRACTURE_SEAM);
+
+    // index 0 --> interior, not on seam
+    // index 1 --> interior, on seam
+    // index 2 --> surface,  not on seam
+    // index 3 --> surface,  on seam
+    long nquads[4] = {0, 0, 0, 0};
+    long ntris[4] = {0, 0, 0, 0};
+    for (size_t n = 0, N = mesher.polygonPoolListSize(); n < N; ++n) {
+        const openvdb::tools::PolygonPool &polygons = polygonPoolList[n];
+        for (size_t i = 0, I = polygons.numQuads(); i < I; ++i) {
+            int flags = (((polygons.quadFlags(i) & exteriorFlag) != 0) << 1) |
+                        ((polygons.quadFlags(i) & seamLineFlag) != 0);
+            ++nquads[flags];
+        }
+        for (size_t i = 0, I = polygons.numTriangles(); i < I; ++i) {
+            int flags = (((polygons.triangleFlags(i) & exteriorFlag) != 0) << 1) |
+                        ((polygons.triangleFlags(i) & seamLineFlag) != 0);
+            ++ntris[flags];
+        }
+    }
+
+    long nverts[4] = {nquads[0] * 4 + ntris[0] * 3,
+                      nquads[1] * 4 + ntris[1] * 3,
+                      nquads[2] * 4 + ntris[2] * 3,
+                      nquads[3] * 4 + ntris[3] * 3};
+    std::vector<int> verts[4];
+    for (int flags = 0; flags < 4; ++flags) {
+        verts[flags].resize(nverts[flags]);
+    }
+
+    long iquad[4] = {0, 0, 0, 0};
+    long itri[4] = {nquads[0] * 4, nquads[1] * 4, nquads[2] * 4, nquads[3] * 4};
+
+    for (size_t n = 0, N = mesher.polygonPoolListSize(); n < N; ++n) {
+        const openvdb::tools::PolygonPool &polygons = polygonPoolList[n];
+
+        // Copy quads
+        for (size_t i = 0, I = polygons.numQuads(); i < I; ++i) {
+            const openvdb::Vec4I &quad = polygons.quad(i);
+            int flags = (((polygons.quadFlags(i) & exteriorFlag) != 0) << 1) |
+                        ((polygons.quadFlags(i) & seamLineFlag) != 0);
+            verts[flags][iquad[flags]++] = quad[0];
+            verts[flags][iquad[flags]++] = quad[1];
+            verts[flags][iquad[flags]++] = quad[2];
+            verts[flags][iquad[flags]++] = quad[3];
+        }
+
+        // Copy triangles (adaptive mesh)
+        for (size_t i = 0, I = polygons.numTriangles(); i < I; ++i) {
+            const openvdb::Vec3I &triangle = polygons.triangle(i);
+            int flags = (((polygons.triangleFlags(i) & exteriorFlag) != 0) << 1) |
+                        ((polygons.triangleFlags(i) & seamLineFlag) != 0);
+            verts[flags][itri[flags]++] = triangle[0];
+            verts[flags][itri[flags]++] = triangle[1];
+            verts[flags][itri[flags]++] = triangle[2];
+        }
+    }
+
+    void *groupe_polygones_sur_couture = maillage.creeUnGroupeDePolygones("polygones_sur_couture");
+    void *groupe_polygones_sur_surface = maillage.creeUnGroupeDePolygones("polygones_sur_surface");
+    void *groupe_polygones_internes = maillage.creeUnGroupeDePolygones("polygones_internes");
+
+    std::vector<int> sommets_par_polygone;
+    long decalage_groupe = 0;
+    for (int flags = 0; flags < 4; ++flags) {
+
+        if (!nquads[flags] && !ntris[flags])
+            continue;
+
+        sommets_par_polygone.resize(nquads[flags] + ntris[flags]);
+        std::fill(sommets_par_polygone.begin(), sommets_par_polygone.begin() + nquads[flags], 4);
+        std::fill(sommets_par_polygone.begin() + nquads[flags],
+                  sommets_par_polygone.begin() + nquads[flags] + ntris[flags],
+                  3);
+
+        maillage.ajouteListePolygones(verts[flags].data(),
+                                      sommets_par_polygone.data(),
+                                      static_cast<long>(sommets_par_polygone.size()));
+        long fin_groupe = decalage_groupe + nquads[flags] + ntris[flags];
+
+        if (groupe_polygones_sur_couture && (flags & 1)) {
+            maillage.ajoutePlageAuGroupe(
+                groupe_polygones_sur_couture, decalage_groupe, fin_groupe);
+        }
+        if (groupe_polygones_sur_surface && (flags & 2)) {
+            maillage.ajoutePlageAuGroupe(
+                groupe_polygones_sur_surface, decalage_groupe, fin_groupe);
+        }
+        if (groupe_polygones_internes && !(flags & 2)) {
+            maillage.ajoutePlageAuGroupe(groupe_polygones_internes, decalage_groupe, fin_groupe);
+        }
+
+        decalage_groupe += nquads[flags] + ntris[flags];
+    }
+
+    // À FAIRE : attribut chaine Keep VDB grid name
+    //    const GA_Index lastPrim = detail.getNumPrimitives();
+    //    if (gridName != nullptr && firstPrim != lastPrim) {
+
+    //        GA_RWAttributeRef aRef = detail.findPrimitiveAttribute("name");
+    //        if (!aRef.isValid())
+    //            aRef = detail.addStringTuple(GA_ATTRIB_PRIMITIVE, "name", 1);
+
+    //        GA_Attribute *nameAttr = aRef.getAttribute();
+    //        if (nameAttr) {
+    //            const GA_AIFSharedStringTuple *stringAIF = nameAttr->getAIFSharedStringTuple();
+    //            if (stringAIF) {
+    //                GA_Range range(detail.getPrimitiveMap(),
+    //                               detail.primitiveOffset(firstPrim),
+    //                               detail.primitiveOffset(lastPrim));
+    //                stringAIF->setString(nameAttr, range, gridName, 0);
+    //            }
+    //        }
+    //    }
+}
+
+void VDB_vers_polygones_impl(ContexteKuri *ctx,
+                             EnveloppeContexteEvaluationVDB &ctx_eval,
+                             ParametresVDBVersMaillage *params,
+                             FluxSortieMaillage *flux_sortie_maillage,
+                             InterruptriceVDB &boss)
+{
+    boss.start("Conversion VDB vers polygones");
+
+    auto grilles = grilles_depuis_iteratrice(*params->groupe_grilles);
+    if (grilles.empty()) {
+        ctx_eval.rapporteAvertissement("Aucune grille à mailler");
+        return;
+    }
+
+    tools::VolumeToMesh mesher(params->isovalue, params->adaptivite);
+    ajoute_masque_surface(ctx_eval, params, mesher);
+    ajoute_champs_adaptivite(ctx_eval, params, mesher);
+
+    /* Crée une grille pour le maillage de référence. */
+#if 0
+    if (params->maillage_reference) {
+        // Collect all level set grids.
+        std::list<openvdb::GridBase::ConstPtr> grids;
+        std::vector<std::string> nonLevelSetList, nonLinearList;
+        for (auto grille : grilles) {
+            if (boss.wasInterrupted()) {
+                break;
+            }
+
+            auto &grid = grille->grid;
+
+            const openvdb::GridClass gridClass = grid->getGridClass();
+            if (gridClass != openvdb::GRID_LEVEL_SET) {
+                nonLevelSetList.push_back(grid->getName());
+                continue;
+            }
+
+            if (!grid->transform().isLinear()) {
+                nonLinearList.push_back(grid->getName());
+                continue;
+            }
+
+            // (We need a shallow copy to sync primitive & grid names).
+            grids.push_back(grid->copyGrid());
+            openvdb::ConstPtrCast<openvdb::GridBase>(grids.back())->setName(grid->getName());
+        }
+
+        if (!nonLevelSetList.empty()) {
+            std::string s = "Reference meshing is only supported for "
+                            "Level Set grids, the following grids were skipped: '" +
+                            hboost::algorithm::join(nonLevelSetList, ", ") + "'.";
+            addWarning(SOP_MESSAGE, s.c_str());
+        }
+
+        if (!nonLinearList.empty()) {
+            std::string s = "The following grids were skipped: '" +
+                            hboost::algorithm::join(nonLinearList, ", ") +
+                            "' because they don't have a linear/affine transform.";
+            addWarning(SOP_MESSAGE, s.c_str());
+        }
+
+        // Mesh using a reference surface
+        if (!grids.empty() && !boss.wasInterrupted()) {
+
+            if (grids.front()->isType<openvdb::FloatGrid>()) {
+                referenceMeshing<openvdb::FloatGrid>(
+                    grids, mesher, refGeo, boss.interrupter(), time);
+            }
+            else if (grids.front()->isType<openvdb::DoubleGrid>()) {
+                referenceMeshing<openvdb::DoubleGrid>(
+                    grids, mesher, refGeo, boss.interrupter(), time);
+            }
+            else {
+                addError(SOP_MESSAGE, "Unsupported grid type.");
+            }
+        }
+
+        auto params_depuis_polygones = ParametresVDBDepuisMaillage();
+        params_depuis_polygones.adaptrice = params->maillage_reference;
+        params_depuis_polygones.bande_en_unite_globale = false;
+        params_depuis_polygones.compte_voxel_bande_exterieure = 3;
+        params_depuis_polygones.compte_voxel_bande_interieure = 3;
+        params_depuis_polygones.genere_champs_de_distance = true;
+        params_depuis_polygones.genere_volume_dense = false;
+        // À FAIRE : genere_grille_indexage
+        // À FAIRE : band_width = 3 si level_set sinon background / voxel_size
+        // À FAIRE : utilise première grille comme référence
+
+        VDB_depuis_polygones_impl(ctx, ctx_eval, &params_depuis_polygones, nullptr, boss);
+        // À FAIRE : vérifie s'il y eu une erreur
+    }
+    else
+#endif
+    {
+        auto flux_sortie_maillage_ = EnveloppeFluxSortieMaillage::enveloppe(*flux_sortie_maillage);
+
+        for (auto grille : grilles) {
+            if (boss.wasInterrupted()) {
+                break;
+            }
+
+            if (!grille->grid) {
+                continue;
+            }
+
+            grille->grid->apply<ScalarGridTypes>(mesher);
+            copyMesh(flux_sortie_maillage_, mesher, grille->grid->getName().c_str());
+        }
+    }
+
+    if (boss.wasInterrupted()) {
+        ctx_eval.rapporteAvertissement("Le processus fut interrompu");
+    }
+
+    boss.end();
+}
+
+void VDB_vers_polygones(ContexteKuri *ctx,
+                        ContexteEvaluationVDB *ctx_eval,
+                        ParametresVDBVersMaillage *params,
+                        FluxSortieMaillage *flux_sortie_maillage,
+                        Interruptrice *interruptrice)
+{
+    InterruptriceVDB boss{interruptrice};
+    EnveloppeContexteEvaluationVDB ctx_eval_ = enveloppe(ctx_eval);
+
+    try {
+        VDB_vers_polygones_impl(ctx, ctx_eval_, params, flux_sortie_maillage, boss);
     }
     catch (std::exception &e) {
         ctx_eval_.rapporteErreur(e.what());

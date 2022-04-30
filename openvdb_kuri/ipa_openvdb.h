@@ -151,6 +151,11 @@ enum MethodeCalculTailleVoxel {
     SOUS_DIVISION_GRAND_AXE,
 };
 
+struct AccesseuseChaine {
+    void (*accede_chaine)(void *, char **, long *);
+    void *donnees;
+};
+
 struct ParametresVDBDepuisMaillage {
     struct AdaptriceMaillage *adaptrice;
 
@@ -166,8 +171,8 @@ struct ParametresVDBDepuisMaillage {
     struct AccesseuseAttribut *attributs_sommets;
     struct AccesseuseAttribut *attributs_polygones;
 
-    const char *nom_champs_distance;
-    const char *nom_volume_dense;
+    struct AccesseuseChaine *nom_champs_distance;
+    struct AccesseuseChaine *nom_volume_dense;
 
     enum MethodeCalculTailleVoxel methode_calcule_taille_voxel;
     float taille_voxel;
@@ -193,6 +198,57 @@ void VDB_depuis_polygones(struct ContexteKuri *ctx,
                           struct ParametresVDBDepuisMaillage *params,
                           struct ExportriceGrilles *exportrice,
                           struct Interruptrice *interruptrice);
+
+struct ExportriceMaillage {
+#ifdef __cplusplus
+  protected:
+#endif
+    void (*reserve_nombre_de_points)(void *, long nombre);
+    void (*reserve_nombre_de_polygones)(void *, long nombre);
+    void (*ajoute_plusieurs_points)(void *, float *points, long nombre);
+    void (*ajoute_un_point)(void *, float x, float y, float z);
+    void (*ajoute_un_polygone)(void *, int *sommets, int taille);
+    void (*ajoute_liste_polygones)(void *,
+                                   int *sommets,
+                                   int *sommets_par_polygone,
+                                   long nombre_polygones);
+
+    void *(*cree_un_groupe_de_points)(void *donnees, const char *nom, long taille_nom);
+    void *(*cree_un_groupe_de_polygones)(void *donnees, const char *nom, long taille_nom);
+    void (*ajoute_au_groupe)(void *poignee_groupe, long index);
+    void (*ajoute_plage_au_groupe)(void *poignee_groupe, long index_debut, long index_fin);
+    void *donnees_utilisateurs;
+};
+
+struct FluxSortieMaillage {
+    void (*cree_un_maillage)(void *donnees_utilisateurs, struct ExportriceMaillage *exportrice);
+    void *donnees_utilisateurs;
+};
+
+struct IteratriceGrillesVDB {
+    struct GrilleVDB *(*suivante)(void *);
+
+    void *donnees_utilisateur;
+};
+
+struct ParametresVDBVersMaillage {
+    struct AdaptriceMaillage *maillage_reference;
+    struct IteratriceGrillesVDB *groupe_grilles;
+
+    struct GrilleVDB *grille_masque_surface;
+    struct GrilleVDB *grille_champs_adaptivite;
+
+    float isovalue;
+    float adaptivite;
+    float decalage_masque;
+    bool inverse_masque;
+};
+
+void VDB_vers_polygones(struct ContexteKuri *ctx,
+                        struct ContexteEvaluationVDB *ctx_eval,
+                        struct ParametresVDBVersMaillage *params,
+                        struct FluxSortieMaillage *flux_sortie_maillage,
+                        struct Interruptrice *interruptrice);
 
 #ifdef __cplusplus
 }
