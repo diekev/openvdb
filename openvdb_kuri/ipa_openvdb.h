@@ -48,6 +48,7 @@ enum TypeVolume {
     DONNEES_POINT = 10,
 };
 
+struct GrilleVDB *VDB_copie_grille(struct ContexteKuri *ctx, struct GrilleVDB *grille);
 void VDB_detruit_grille(struct ContexteKuri *ctx, struct GrilleVDB *grille);
 void VDB_accede_nom_grille(struct GrilleVDB *grille, const char **nom, long *taille);
 void VDB_mute_nom_grille(struct GrilleVDB *grille, const char *nom, long taille);

@@ -57,6 +57,17 @@ struct GrilleVDB {
     GridBase::Ptr grid;
 };
 
+GrilleVDB *VDB_copie_grille(ContexteKuri *ctx, GrilleVDB *grille)
+{
+    if (!grille) {
+        return nullptr;
+    }
+
+    GrilleVDB *resultat = kuri_loge<GrilleVDB>(ctx);
+    resultat->grid = grille->grid;
+    return resultat;
+}
+
 void VDB_detruit_grille(struct ContexteKuri *ctx, struct GrilleVDB *grille)
 {
     kuri_deloge(ctx, grille);
