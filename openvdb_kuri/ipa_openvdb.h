@@ -251,6 +251,51 @@ void VDB_vers_polygones(struct ContexteKuri *ctx,
                         struct FluxSortieMaillage *flux_sortie_maillage,
                         struct Interruptrice *interruptrice);
 
+enum ComportementFichierManquant {
+    RAPPORTE_ERREUR,
+    CONTINUE_SANS_RIEN_CREER,
+};
+
+struct ParametresLectureVDB {
+    /** Chemin vers le fichier `.vdb`. */
+    struct AccesseuseChaine *chemin_fichier;
+
+    /** Détermine que faire si le fichier n'est pas trouvé : émettre une erreur et arrêter
+     * (RAPPORTE_ERREUR), ou continue sans rien créer (CONTINUE_SANS_RIEN_CREER). */
+    enum ComportementFichierManquant comportement_fichier_manquant;
+
+    /** Crée des grilles ne contenant que les métadonnées des grilles dans le fichier. */
+    bool metadonnees_seules;
+
+    /** Rogne les grilles selon la boite englobante du maillage de référence. */
+    bool rogne;
+
+    /** Maillage de référence pour déterminer la boite englobante. */
+    struct AdaptriceMaillage *maillage_reference;
+
+    /** Crée un groupe contenant les grilles lues. */
+    bool cree_groupe;
+
+    /** Nom du groupe à créer, si #cree_groupe est actif. */
+    struct AccesseuseChaine *nom_groupe;
+
+    /** Ne charge les données des grilles que lorsqu'elles seront vraiment utilisées. */
+    bool chargement_tardif;
+
+    /** Si #chargement_tardif est actif, les fichiers plus petit que cette limite (en giga-octets)
+     * sont copier dans un dossier temporaire afin de garantir que le fichier ne sera pas modifié
+     * par un programme externe. */
+    float limite_pour_copier;
+
+    // À FAIRE : liste de grilles à charger
+};
+
+void VDB_depuis_fichier(struct ContexteKuri *ctx,
+                        struct ContexteEvaluationVDB *ctx_eval,
+                        struct ParametresLectureVDB *params,
+                        struct ExportriceGrilles *flux_sortie_grille,
+                        struct Interruptrice *interruptrice);
+
 #ifdef __cplusplus
 }
 #endif
