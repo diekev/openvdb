@@ -24,15 +24,42 @@
 
 #include "ipa_openvdb.h"
 
+#include <list>
+
+#include "openvdb/math/Ray.h"
 #include "openvdb/tools/LevelSetUtil.h"
 #include "openvdb/tools/Mask.h"  // pour tools::interiorMask()
 #include "openvdb/tools/MeshToVolume.h"
+#include "openvdb/tools/Morphology.h"
 #include "openvdb/tools/ParticlesToLevelSet.h"
 #include "openvdb/tools/VolumeToMesh.h"
 
 #include "../InterfaceCKuri/contexte_kuri.hh"
 
 using namespace openvdb::OPENVDB_VERSION_NAME;
+
+/* *********************************************************************** */
+
+namespace outils {
+
+static std::string enchaine(std::vector<std::string> const &chaines, std::string const &separateur)
+{
+    if (chaines.empty()) {
+        return "";
+    }
+
+    std::stringstream os;
+
+    os << chaines[0];
+    for (size_t i = 1; i < chaines.size(); i++) {
+        os << separateur;
+        os << chaines[i];
+    }
+
+    return os.str();
+}
+
+}  // namespace outils
 
 /* *********************************************************************** */
 
@@ -210,6 +237,15 @@ class AdaptriceMaillageVDB : public AdaptriceMaillage {
         return pos;
     }
 
+    void setPoint(long n, math::Vec3d const &point)
+    {
+        this->remplace_point_a_l_index(this->donnees,
+                                       n,
+                                       static_cast<float>(point.x()),
+                                       static_cast<float>(point.y()),
+                                       static_cast<float>(point.z()));
+    }
+
     void indexSommetsPolygone(long n, int *index) const
     {
         this->index_points_sommets_polygone(this->donnees, n, index);
@@ -217,6 +253,9 @@ class AdaptriceMaillageVDB : public AdaptriceMaillage {
 
     void rafinePolygone(long i, const RafineusePolygone &rafineuse) const
     {
+        if (!this->rafine_polygone) {
+            return;
+        }
         this->rafine_polygone(this->donnees, i, &rafineuse);
     }
 
@@ -233,6 +272,86 @@ class AdaptriceMaillageVDB : public AdaptriceMaillage {
         Vec3d min = Vec3d(min_x, min_y, min_z);
         Vec3d max = Vec3d(max_x, max_y, max_z);
         return {min, max};
+    }
+
+    Vec3s normalPolygone(size_t i) const
+    {
+        float nx, ny, nz;
+        this->calcule_normal_polygone(this->donnees, static_cast<long>(i), &nx, &ny, &nz);
+        return {nx, ny, nz};
+    }
+
+    void ajoutePoints(float *points, long nombre) const
+    {
+        if (this->ajoute_plusieurs_points) {
+            this->ajoute_plusieurs_points(this->donnees, points, nombre);
+            return;
+        }
+
+        reserveNombreDePoints(nombre);
+
+        for (int i = 0; i < nombre; i++) {
+            ajouteUnPoint(points[0], points[1], points[2]);
+            points += 3;
+        }
+    }
+
+    void reserveNombreDePoints(long nombre) const
+    {
+        this->reserve_nombre_de_points(this->donnees, nombre);
+    }
+
+    void reserveNombreDePolygones(long nombre) const
+    {
+        this->reserve_nombre_de_polygones(this->donnees, nombre);
+    }
+
+    void ajouteUnPoint(float x, float y, float z) const
+    {
+        this->ajoute_un_point(this->donnees, x, y, z);
+    }
+
+    void ajouteListePolygones(int *sommets, int *sommets_par_polygones, long nombre_polygones)
+    {
+        this->ajoute_liste_polygones(
+            this->donnees, sommets, sommets_par_polygones, nombre_polygones);
+    }
+
+    void ajouteUnPolygone(int *sommets, int taille) const
+    {
+        this->ajoute_un_polygone(this->donnees, sommets, taille);
+    }
+
+    void *creeUnGroupeDePoints(const std::string &nom) const
+    {
+        return this->cree_un_groupe_de_points(
+            this->donnees, nom.c_str(), static_cast<long>(nom.size()));
+    }
+
+    void *creeUnGroupeDePolygones(const std::string &nom) const
+    {
+        return this->cree_un_groupe_de_polygones(
+            this->donnees, nom.c_str(), static_cast<long>(nom.size()));
+    }
+
+    void ajouteAuGroupe(void *poignee_groupe, long index) const
+    {
+        this->ajoute_au_groupe(poignee_groupe, index);
+    }
+
+    void ajoutePlageAuGroupe(void *poignee_groupe, long index_debut, long index_fin) const
+    {
+        this->ajoute_plage_au_groupe(poignee_groupe, index_debut, index_fin);
+    }
+
+    bool groupePolygonePossedePoint(const void *poignee_groupe, long index) const
+    {
+        return this->groupe_polygone_possede_point(poignee_groupe, index);
+    }
+
+    tbb::blocked_range<long> plagePoint() const
+    {
+        return tbb::blocked_range<long>(0, static_cast<long>(pointCount()));
     }
 };
 
@@ -420,10 +539,6 @@ static std::vector<Vec4I> extrait_quads_et_triangles(const AdaptriceMaillageVDB 
             resultat.push_back(quad);
         }
         else if (nombre_de_sommets > 4) {
-            if (!adaptrice_vdb.rafine_polygone) {
-                continue;
-            }
-
             adaptrice_vdb.rafinePolygone(i, rafineuse);
         }
     }
@@ -483,11 +598,20 @@ static std::string chaine_depuis_accesseuse(AccesseuseChaine *accesseuse)
     return std::string(nom, static_cast<size_t>(taille));
 }
 
+/* Utilisée pour que des fonctions qui appelent VDB_depuis_polygones_impl puissent extraire
+ * certaines données locales. */
+struct ExtractionDonneesVDBDepuisPolygones {
+    GridBase::Ptr champs_de_distance = nullptr;
+    Int32Grid::Ptr grille_index = nullptr;
+    tools::MeshToVoxelEdgeData *donnees_aretes_voxel = nullptr;
+};
+
 static void VDB_depuis_polygones_impl(ContexteKuri *ctx,
                                       EnveloppeContexteEvaluationVDB &ctx_eval_,
                                       ParametresVDBDepuisMaillage *params,
                                       ExportriceGrilles *exportrice,
-                                      InterruptriceVDB &boss)
+                                      InterruptriceVDB &boss,
+                                      ExtractionDonneesVDBDepuisPolygones *extraction = nullptr)
 {
     boss.start("Conversion de polygones en volumes VDB");
 
@@ -537,8 +661,15 @@ static void VDB_depuis_polygones_impl(ContexteKuri *ctx,
 
     /* Grille d'index pour les attributs. */
     Int32Grid::Ptr grille_index;
-    if (params->transfere_attributs) {
+    if (params->transfere_attributs || extraction) {
         grille_index.reset(new Int32Grid(0));
+    }
+
+    if (extraction) {
+        extraction->grille_index = grille_index;
+        if (extraction->donnees_aretes_voxel) {
+            extraction->donnees_aretes_voxel->convert(points, polygones);
+        }
     }
 
     int drapeaux = params->champs_distance_absolue ? tools::UNSIGNED_DISTANCE_FIELD : 0;
@@ -556,7 +687,11 @@ static void VDB_depuis_polygones_impl(ContexteKuri *ctx,
     FloatGrid::Ptr grille = tools::meshToVolume<FloatGrid>(
         boss, mesh, *transform, bande_exterieure, bande_interieure, drapeaux, grille_index.get());
 
-    if (!boss.wasInterrupted() && params->genere_champs_de_distance) {
+    if (extraction) {
+        extraction->champs_de_distance = grille;
+    }
+
+    if (!boss.wasInterrupted() && params->genere_champs_de_distance && exportrice) {
         exporte_grille_vdb(
             ctx, exportrice, grille, chaine_depuis_accesseuse(params->nom_champs_distance));
     }
@@ -697,76 +832,6 @@ static void ajoute_champs_adaptivite(EnveloppeContexteEvaluationVDB &ctx_eval,
     mesher.setSpatialAdaptivity(grille);
 }
 
-struct EnveloppeExportriceMaillage : public ExportriceMaillage {
-    static EnveloppeExportriceMaillage enveloppe(ExportriceMaillage &exportrice)
-    {
-        return {exportrice};
-    }
-
-    void ajoutePoints(float *points, long nombre) const
-    {
-        if (this->ajoute_plusieurs_points) {
-            this->ajoute_plusieurs_points(this->donnees_utilisateurs, points, nombre);
-            return;
-        }
-
-        reserveNombreDePoints(nombre);
-
-        for (int i = 0; i < nombre; i++) {
-            ajouteUnPoint(points[0], points[1], points[2]);
-            points += 3;
-        }
-    }
-
-    void reserveNombreDePoints(long nombre) const
-    {
-        this->reserve_nombre_de_points(this->donnees_utilisateurs, nombre);
-    }
-
-    void reserveNombreDePolygones(long nombre) const
-    {
-        this->reserve_nombre_de_polygones(this->donnees_utilisateurs, nombre);
-    }
-
-    void ajouteUnPoint(float x, float y, float z) const
-    {
-        this->ajoute_un_point(this->donnees_utilisateurs, x, y, z);
-    }
-
-    void ajouteListePolygones(int *sommets, int *sommets_par_polygones, long nombre_polygones)
-    {
-        this->ajoute_liste_polygones(
-            this->donnees_utilisateurs, sommets, sommets_par_polygones, nombre_polygones);
-    }
-
-    void ajouteUnPolygone(int *sommets, int taille) const
-    {
-        this->ajoute_un_polygone(this->donnees_utilisateurs, sommets, taille);
-    }
-
-    void *creeUnGroupeDePoints(const std::string &nom) const
-    {
-        return this->cree_un_groupe_de_points(
-            this->donnees_utilisateurs, nom.c_str(), static_cast<long>(nom.size()));
-    }
-
-    void *creeUnGroupeDePolygones(const std::string &nom) const
-    {
-        return this->cree_un_groupe_de_polygones(
-            this->donnees_utilisateurs, nom.c_str(), static_cast<long>(nom.size()));
-    }
-
-    void ajouteAuGroupe(void *poignee_groupe, long index) const
-    {
-        this->ajoute_au_groupe(poignee_groupe, index);
-    }
-
-    void ajoutePlageAuGroupe(void *poignee_groupe, long index_debut, long index_fin) const
-    {
-        this->ajoute_plage_au_groupe(poignee_groupe, index_debut, index_fin);
-    }
-};
-
 struct EnveloppeFluxSortieMaillage : public FluxSortieMaillage {
   public:
     static EnveloppeFluxSortieMaillage enveloppe(FluxSortieMaillage &flux)
@@ -774,11 +839,11 @@ struct EnveloppeFluxSortieMaillage : public FluxSortieMaillage {
         return {flux};
     }
 
-    EnveloppeExportriceMaillage creeUnMaillage()
+    AdaptriceMaillageVDB creeUnMaillage()
     {
-        ExportriceMaillage exportrice{};
+        AdaptriceMaillage exportrice{};
         this->cree_un_maillage(this->donnees_utilisateurs, &exportrice);
-        return EnveloppeExportriceMaillage::enveloppe(exportrice);
+        return ::enveloppe(&exportrice);
     }
 };
 
@@ -925,6 +990,404 @@ void copyMesh(EnveloppeFluxSortieMaillage &flux_sortie_maillages,
     //    }
 }
 
+////////////////////////////////////////
+
+/// TBB body object for threaded sharp feature construction
+template <typename IndexTreeType, typename BoolTreeType>
+class GenAdaptivityMaskOp {
+  public:
+    using BoolLeafManager = openvdb::tree::LeafManager<BoolTreeType>;
+
+    GenAdaptivityMaskOp(const AdaptriceMaillageVDB &refGeo,
+                        const IndexTreeType &indexTree,
+                        BoolLeafManager &,
+                        float edgetolerance = 0.0);
+
+    void run(bool threaded = true);
+
+    void operator()(const tbb::blocked_range<size_t> &) const;
+
+  private:
+    const AdaptriceMaillageVDB &mRefGeo;
+    const IndexTreeType &mIndexTree;
+    BoolLeafManager &mLeafs;
+    float mEdgeTolerance;
+    std::vector<Vec3s> normaux;
+};
+
+template <typename IndexTreeType, typename BoolTreeType>
+GenAdaptivityMaskOp<IndexTreeType, BoolTreeType>::GenAdaptivityMaskOp(
+    const AdaptriceMaillageVDB &refGeo,
+    const IndexTreeType &indexTree,
+    BoolLeafManager &leafMgr,
+    float edgetolerance)
+    : mRefGeo(refGeo), mIndexTree(indexTree), mLeafs(leafMgr), mEdgeTolerance(edgetolerance)
+{
+    mEdgeTolerance = std::max(0.0f, mEdgeTolerance);
+    mEdgeTolerance = std::min(1.0f, mEdgeTolerance);
+
+    normaux.resize(refGeo.polygonCount());
+
+    for (size_t i = 0; i < refGeo.polygonCount(); i++) {
+        normaux[i] = refGeo.normalPolygone(i);
+    }
+}
+
+template <typename IndexTreeType, typename BoolTreeType>
+void GenAdaptivityMaskOp<IndexTreeType, BoolTreeType>::run(bool threaded)
+{
+    if (threaded) {
+        tbb::parallel_for(mLeafs.getRange(), *this);
+    }
+    else {
+        (*this)(mLeafs.getRange());
+    }
+}
+
+template <typename IndexTreeType, typename BoolTreeType>
+void GenAdaptivityMaskOp<IndexTreeType, BoolTreeType>::operator()(
+    const tbb::blocked_range<size_t> &range) const
+{
+    using IndexAccessorType = typename openvdb::tree::ValueAccessor<const IndexTreeType>;
+    IndexAccessorType idxAcc(mIndexTree);
+
+    Vec3s tmpN, normal;
+    int tmpIdx;
+
+    openvdb::Coord ijk, nijk;
+    typename BoolTreeType::LeafNodeType::ValueOnIter iter;
+
+    for (size_t n = range.begin(); n < range.end(); ++n) {
+        iter = mLeafs.leaf(n).beginValueOn();
+        for (; iter; ++iter) {
+            ijk = iter.getCoord();
+
+            bool edgeVoxel = false;
+
+            int idx = idxAcc.getValue(ijk);
+
+            normal = normaux[idx];
+
+            for (size_t i = 0; i < 18; ++i) {
+                nijk = ijk + openvdb::util::COORD_OFFSETS[i];
+                if (idxAcc.probeValue(nijk, tmpIdx) && tmpIdx != idx) {
+                    tmpN = normaux[tmpIdx];
+
+                    if (normal.dot(tmpN) < mEdgeTolerance) {
+                        edgeVoxel = true;
+                        break;
+                    }
+                }
+            }
+
+            if (!edgeVoxel)
+                iter.setValueOff();
+        }
+    }
+}
+
+////////////////////////////////////////
+
+/// TBB body object for threaded sharp feature construction
+class SharpenFeaturesOp {
+  public:
+    using EdgeData = openvdb::tools::MeshToVoxelEdgeData;
+
+    SharpenFeaturesOp(AdaptriceMaillageVDB &meshGeo,
+                      const AdaptriceMaillageVDB &refGeo,
+                      EdgeData &edgeData,
+                      const openvdb::math::Transform &xform,
+                      const void *surfacePrims = nullptr,
+                      const openvdb::BoolTree *mask = nullptr);
+
+    void operator()(const tbb::blocked_range<long> &) const;
+
+  private:
+    AdaptriceMaillageVDB &mMeshGeo;
+    const AdaptriceMaillageVDB &mRefGeo;
+    EdgeData &mEdgeData;
+    const openvdb::math::Transform &mXForm;
+    const void *mSurfacePrims;
+    const openvdb::BoolTree *mMaskTree;
+};
+
+SharpenFeaturesOp::SharpenFeaturesOp(AdaptriceMaillageVDB &meshGeo,
+                                     const AdaptriceMaillageVDB &refGeo,
+                                     EdgeData &edgeData,
+                                     const openvdb::math::Transform &xform,
+                                     const void *surfacePrims,
+                                     const openvdb::BoolTree *mask)
+    : mMeshGeo(meshGeo), mRefGeo(refGeo), mEdgeData(edgeData), mXForm(xform),
+      mSurfacePrims(surfacePrims), mMaskTree(mask)
+{
+}
+
+void SharpenFeaturesOp::operator()(const tbb::blocked_range<long> &range) const
+{
+    openvdb::tools::MeshToVoxelEdgeData::Accessor acc = mEdgeData.getAccessor();
+
+    using BoolAccessor = openvdb::tree::ValueAccessor<const openvdb::BoolTree>;
+    std::unique_ptr<BoolAccessor> maskAcc;
+
+    if (mMaskTree) {
+        maskAcc.reset(new BoolAccessor(*mMaskTree));
+    }
+
+    Vec3s tmpN, tmpP, avgP;
+    math::BBox<Vec3d> cell;
+
+    openvdb::Vec3d pos, normal;
+    openvdb::Coord ijk;
+
+    std::vector<openvdb::Vec3d> points, normals;
+    std::vector<openvdb::Index32> primitives;
+
+    points.reserve(12);
+    normals.reserve(12);
+    primitives.reserve(12);
+    for (long ptnOffset = range.begin(); ptnOffset < range.end(); ++ptnOffset) {
+        // Check if this point is referenced by a surface primitive.
+        if (mSurfacePrims && !mMeshGeo.groupePolygonePossedePoint(mSurfacePrims, ptnOffset))
+            continue;
+
+        tmpP = mMeshGeo.getPoint(ptnOffset);
+        pos[0] = tmpP.x();
+        pos[1] = tmpP.y();
+        pos[2] = tmpP.z();
+
+        pos = mXForm.worldToIndex(pos);
+
+        ijk[0] = int(std::floor(pos[0]));
+        ijk[1] = int(std::floor(pos[1]));
+        ijk[2] = int(std::floor(pos[2]));
+
+        if (maskAcc && !maskAcc->isValueOn(ijk))
+            continue;
+
+        points.clear();
+        normals.clear();
+        primitives.clear();
+
+        // get voxel-edge intersections
+        mEdgeData.getEdgeData(acc, ijk, points, primitives);
+
+        avgP = Vec3s(0.0f, 0.0f, 0.0f);
+
+        // get normal list
+        for (size_t n = 0, N = points.size(); n < N; ++n) {
+            avgP.x() = static_cast<float>(avgP.x() + points[n].x());
+            avgP.y() = static_cast<float>(avgP.y() + points[n].y());
+            avgP.z() = static_cast<float>(avgP.z() + points[n].z());
+
+            tmpN = mRefGeo.normalPolygone(primitives[n]);
+
+            normal[0] = tmpN.x();
+            normal[1] = tmpN.y();
+            normal[2] = tmpN.z();
+
+            normals.push_back(normal);
+        }
+
+        // Calculate feature point position
+        if (points.size() <= 1) {
+            continue;
+        }
+
+        pos = openvdb::tools::findFeaturePoint(points, normals);
+
+        // Constrain points to stay inside their initial
+        // coordinate cell.
+        auto min_bound = Vec3d(double(ijk[0]), double(ijk[1]), double(ijk[2]));
+        auto max_bound = Vec3d(double(ijk[0] + 1), double(ijk[1] + 1), double(ijk[2] + 1));
+        cell = math::BBox<Vec3d>(min_bound, max_bound);
+        cell.expand(0.3);
+
+        if (!cell.isInside(pos)) {
+            Vec3s org(static_cast<float>(pos[0]),
+                      static_cast<float>(pos[1]),
+                      static_cast<float>(pos[2]));
+
+            avgP *= 1.f / float(points.size());
+            Vec3s dir = avgP - org;
+            dir.normalize();
+
+            double distance;
+
+            math::Ray ray;
+            ray.reset(org, dir);
+
+            double t1;
+            if (ray.intersects(cell, distance, t1)) {
+                tmpP = org + dir * distance;
+
+                pos[0] = tmpP.x();
+                pos[1] = tmpP.y();
+                pos[2] = tmpP.z();
+            }
+        }
+
+        pos = mXForm.indexToWorld(pos);
+
+        tmpP.x() = static_cast<float>(pos[0]);
+        tmpP.y() = static_cast<float>(pos[1]);
+        tmpP.z() = static_cast<float>(pos[2]);
+
+        mMeshGeo.setPoint(ptnOffset, tmpP);
+    }
+}
+
+template <typename GridType>
+static void vdb_vers_polygones_reference(ContexteKuri *ctx,
+                                         EnveloppeContexteEvaluationVDB &ctx_eval,
+                                         ParametresVDBVersMaillage *params,
+                                         EnveloppeFluxSortieMaillage &flux_sortie_maillage,
+                                         tools::VolumeToMesh &mesher,
+                                         std::list<openvdb::GridBase::ConstPtr> const &grids,
+                                         InterruptriceVDB &boss)
+{
+    typename GridType::ConstPtr firstGrid = openvdb::gridConstPtrCast<GridType>(grids.front());
+
+    if (!firstGrid) {
+        ctx_eval.rapporteErreur("Type de grille non supporté");
+        return;
+    }
+
+    using TreeType = typename GridType::TreeType;
+    using ValueType = typename GridType::ValueType;
+    using IntGridT = typename GridType::template ValueConverter<openvdb::Int32>::Type;
+    openvdb::math::Transform::Ptr transform = firstGrid->transform().copy();
+    const ValueType backgroundValue = firstGrid->background();
+    const openvdb::GridClass gridClass = firstGrid->getGridClass();
+
+    /* Crée la grille de référence. */
+    openvdb::tools::MeshToVoxelEdgeData edgeData;
+
+    ExtractionDonneesVDBDepuisPolygones extraction;
+    if (params->affiner_les_traits) {
+        extraction.donnees_aretes_voxel = &edgeData;
+    }
+
+    float largeur_de_bande = 3.0f;
+    if (gridClass != GRID_LEVEL_SET) {
+        largeur_de_bande = static_cast<float>(backgroundValue) /
+                           static_cast<float>(transform->voxelSize()[0]);
+    }
+
+    GrilleVDB grille_reference_maillage;
+    grille_reference_maillage.grid = ConstPtrCast<GridBase>(grids.front());
+
+    auto params_depuis_polygones = ParametresVDBDepuisMaillage();
+    params_depuis_polygones.adaptrice = params->maillage_reference;
+    params_depuis_polygones.bande_en_unite_globale = false;
+    params_depuis_polygones.compte_voxel_bande_exterieure = static_cast<int>(largeur_de_bande);
+    params_depuis_polygones.compte_voxel_bande_interieure = static_cast<int>(largeur_de_bande);
+    params_depuis_polygones.genere_champs_de_distance = true;
+    params_depuis_polygones.genere_volume_dense = false;
+    params_depuis_polygones.utilise_grille_reference = true;
+    params_depuis_polygones.grille_reference = &grille_reference_maillage;
+
+    VDB_depuis_polygones_impl(ctx, ctx_eval, &params_depuis_polygones, nullptr, boss, &extraction);
+
+    if (boss.wasInterrupted()) {
+        return;
+    }
+
+    auto refGrid = openvdb::gridConstPtrCast<GridType>(extraction.champs_de_distance);
+
+    auto indexGrid = extraction.grille_index;
+
+    using BoolTreeType = typename TreeType::template ValueConverter<bool>::Type;
+    typename BoolTreeType::Ptr maskTree;
+    if (params->affiner_les_traits) {
+        maskTree = typename BoolTreeType::Ptr(new BoolTreeType(false));
+        maskTree->topologyUnion(indexGrid->tree());
+        openvdb::tree::LeafManager<BoolTreeType> maskLeafs(*maskTree);
+
+        GenAdaptivityMaskOp<typename IntGridT::TreeType, BoolTreeType> op(
+            enveloppe(params->maillage_reference),
+            indexGrid->tree(),
+            maskLeafs,
+            params->tolerance_de_bord);
+        op.run();
+
+        openvdb::tools::pruneInactive(*maskTree);
+
+        openvdb::tools::dilateActiveValues(
+            *maskTree, 2, openvdb::tools::NN_FACE, openvdb::tools::IGNORE_TILES);
+
+        mesher.setAdaptivityMask(maskTree);
+    }
+
+    if (boss.wasInterrupted()) {
+        return;
+    }
+
+    mesher.setRefGrid(refGrid, params->adaptivite_interne);
+
+    std::vector<std::string> badTransformList, badBackgroundList, badTypeList;
+    for (auto &grille : grids) {
+        if (boss.wasInterrupted()) {
+            break;
+        }
+
+        typename GridType::ConstPtr grid = openvdb::gridConstPtrCast<GridType>(grille);
+
+        if (!grid) {
+            badTypeList.push_back(grid->getName());
+            continue;
+        }
+
+        if (grid->transform() != *transform) {
+            badTransformList.push_back(grid->getName());
+            continue;
+        }
+
+        if (!openvdb::math::isApproxEqual(grid->background(), backgroundValue)) {
+            badBackgroundList.push_back(grid->getName());
+            continue;
+        }
+
+        mesher(*grid);
+
+        copyMesh(flux_sortie_maillage, mesher, grid->getName().c_str());
+    }
+
+    /* Affinage des traits. */
+    if (!boss.wasInterrupted() && params->affiner_les_traits) {
+        //        tbb::parallel_for(GA_SplittableRange(gdp->getPointRange()),
+        //                      hvdb::SharpenFeaturesOp(
+        //                          *gdp, *refGeo, edgeData, *transform, surfaceGroup,
+        //                          maskTree.get()));
+    }
+
+    // Transfer primitive attributes
+    //    if (!boss.wasInterrupted() && transferAttributes && refGeo && indexGrid) {
+    //        hvdb::transferPrimitiveAttributes(*refGeo, *gdp, *indexGrid, boss, surfaceGroup);
+    //    }
+
+    if (!badTransformList.empty()) {
+        std::string s = "Les grilles suivantes furent ignorées : '" +
+                        outils::enchaine(badTransformList, ", ") +
+                        "' car leurs transformations sont différentes de la première grille.";
+        ctx_eval.rapporteAvertissement(s);
+    }
+
+    if (!badBackgroundList.empty()) {
+        std::string s =
+            "Les grilles suivantes furent ignorées : '" +
+            outils::enchaine(badBackgroundList, ", ") +
+            "' car leurs valeurs d'arrière plan sont différentes de la première grille.";
+        ctx_eval.rapporteAvertissement(s);
+    }
+
+    if (!badTypeList.empty()) {
+        std::string s = "Les grilles suivantes furent ignorées : '" +
+                        outils::enchaine(badTypeList, ", ") +
+                        "' car leurs types de données sont différents de la première grille.";
+        ctx_eval.rapporteAvertissement(s);
+    }
+}
+
 void VDB_vers_polygones_impl(ContexteKuri *ctx,
                              EnveloppeContexteEvaluationVDB &ctx_eval,
                              ParametresVDBVersMaillage *params,
@@ -939,12 +1402,13 @@ void VDB_vers_polygones_impl(ContexteKuri *ctx,
         return;
     }
 
+    auto flux_sortie_maillage_ = EnveloppeFluxSortieMaillage::enveloppe(*flux_sortie_maillage);
+
     tools::VolumeToMesh mesher(params->isovalue, params->adaptivite);
     ajoute_masque_surface(ctx_eval, params, mesher);
     ajoute_champs_adaptivite(ctx_eval, params, mesher);
 
     /* Crée une grille pour le maillage de référence. */
-#if 0
     if (params->maillage_reference) {
         // Collect all level set grids.
         std::list<openvdb::GridBase::ConstPtr> grids;
@@ -973,54 +1437,39 @@ void VDB_vers_polygones_impl(ContexteKuri *ctx,
         }
 
         if (!nonLevelSetList.empty()) {
-            std::string s = "Reference meshing is only supported for "
-                            "Level Set grids, the following grids were skipped: '" +
-                            hboost::algorithm::join(nonLevelSetList, ", ") + "'.";
-            addWarning(SOP_MESSAGE, s.c_str());
+            std::string s =
+                "Le maillage de référence n'est supporté que pour les champs de distance "
+                ", les grille suivantes furent ignorées : '" +
+                outils::enchaine(nonLevelSetList, ", ") + "'.";
+            ctx_eval.rapporteAvertissement(s);
         }
 
         if (!nonLinearList.empty()) {
-            std::string s = "The following grids were skipped: '" +
-                            hboost::algorithm::join(nonLinearList, ", ") +
-                            "' because they don't have a linear/affine transform.";
-            addWarning(SOP_MESSAGE, s.c_str());
+            std::string s = "Les grilles suivantes furent ignorées : '" +
+                            outils::enchaine(nonLinearList, ", ") +
+                            "' car leurs transformations ne sont ni linéaires ni affines.";
+            ctx_eval.rapporteAvertissement(s);
         }
 
         // Mesh using a reference surface
         if (!grids.empty() && !boss.wasInterrupted()) {
-
             if (grids.front()->isType<openvdb::FloatGrid>()) {
-                referenceMeshing<openvdb::FloatGrid>(
-                    grids, mesher, refGeo, boss.interrupter(), time);
+                vdb_vers_polygones_reference<openvdb::FloatGrid>(
+                    ctx, ctx_eval, params, flux_sortie_maillage_, mesher, grids, boss);
             }
+#if 0
+            // À FAIRE : double
             else if (grids.front()->isType<openvdb::DoubleGrid>()) {
-                referenceMeshing<openvdb::DoubleGrid>(
-                    grids, mesher, refGeo, boss.interrupter(), time);
+                vdb_vers_polygones_reference<openvdb::DoubleGrid>(
+                    ctx, ctx_eval, params, flux_sortie_maillage_, mesher, grids, boss);
             }
+#endif
             else {
-                addError(SOP_MESSAGE, "Unsupported grid type.");
+                ctx_eval.rapporteErreur("Type de grille non supporté");
             }
         }
-
-        auto params_depuis_polygones = ParametresVDBDepuisMaillage();
-        params_depuis_polygones.adaptrice = params->maillage_reference;
-        params_depuis_polygones.bande_en_unite_globale = false;
-        params_depuis_polygones.compte_voxel_bande_exterieure = 3;
-        params_depuis_polygones.compte_voxel_bande_interieure = 3;
-        params_depuis_polygones.genere_champs_de_distance = true;
-        params_depuis_polygones.genere_volume_dense = false;
-        // À FAIRE : genere_grille_indexage
-        // À FAIRE : band_width = 3 si level_set sinon background / voxel_size
-        // À FAIRE : utilise première grille comme référence
-
-        VDB_depuis_polygones_impl(ctx, ctx_eval, &params_depuis_polygones, nullptr, boss);
-        // À FAIRE : vérifie s'il y eu une erreur
     }
-    else
-#endif
-    {
-        auto flux_sortie_maillage_ = EnveloppeFluxSortieMaillage::enveloppe(*flux_sortie_maillage);
-
+    else {
         for (auto grille : grilles) {
             if (boss.wasInterrupted()) {
                 break;

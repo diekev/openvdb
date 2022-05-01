@@ -78,11 +78,15 @@ struct RafineusePolygone {
 };
 
 struct AdaptriceMaillage {
+#ifdef __cplusplus
+  protected:
+#endif
     long (*nombre_de_polygones)(void *);
     long (*nombre_de_points)(void *);
     long (*nombre_de_sommets_polygone)(void *, long n);
 
     void (*point_pour_index)(void *, long n, float *x, float *y, float *z);
+    void (*remplace_point_a_l_index)(void *, long n, float x, float y, float z);
 
     void (*point_pour_sommet_polygone)(void *, long p, long s, float *x, float *y, float *z);
     void (*index_points_sommets_polygone)(void *, long n, int *index);
@@ -98,6 +102,23 @@ struct AdaptriceMaillage {
                                      float *max_x,
                                      float *max_y,
                                      float *max_z);
+
+    void (*calcule_normal_polygone)(void *, long p, float *nx, float *ny, float *nz);
+    void (*reserve_nombre_de_points)(void *, long nombre);
+    void (*reserve_nombre_de_polygones)(void *, long nombre);
+    void (*ajoute_plusieurs_points)(void *, float *points, long nombre);
+    void (*ajoute_un_point)(void *, float x, float y, float z);
+    void (*ajoute_un_polygone)(void *, int *sommets, int taille);
+    void (*ajoute_liste_polygones)(void *,
+                                   int *sommets,
+                                   int *sommets_par_polygone,
+                                   long nombre_polygones);
+
+    void *(*cree_un_groupe_de_points)(void *donnees, const char *nom, long taille_nom);
+    void *(*cree_un_groupe_de_polygones)(void *donnees, const char *nom, long taille_nom);
+    void (*ajoute_au_groupe)(void *poignee_groupe, long index);
+    void (*ajoute_plage_au_groupe)(void *poignee_groupe, long index_debut, long index_fin);
+    bool (*groupe_polygone_possede_point)(const void *poignee_groupe, long index);
 
     void *donnees;
 };
@@ -200,29 +221,8 @@ void VDB_depuis_polygones(struct ContexteKuri *ctx,
                           struct ExportriceGrilles *exportrice,
                           struct Interruptrice *interruptrice);
 
-struct ExportriceMaillage {
-#ifdef __cplusplus
-  protected:
-#endif
-    void (*reserve_nombre_de_points)(void *, long nombre);
-    void (*reserve_nombre_de_polygones)(void *, long nombre);
-    void (*ajoute_plusieurs_points)(void *, float *points, long nombre);
-    void (*ajoute_un_point)(void *, float x, float y, float z);
-    void (*ajoute_un_polygone)(void *, int *sommets, int taille);
-    void (*ajoute_liste_polygones)(void *,
-                                   int *sommets,
-                                   int *sommets_par_polygone,
-                                   long nombre_polygones);
-
-    void *(*cree_un_groupe_de_points)(void *donnees, const char *nom, long taille_nom);
-    void *(*cree_un_groupe_de_polygones)(void *donnees, const char *nom, long taille_nom);
-    void (*ajoute_au_groupe)(void *poignee_groupe, long index);
-    void (*ajoute_plage_au_groupe)(void *poignee_groupe, long index_debut, long index_fin);
-    void *donnees_utilisateurs;
-};
-
 struct FluxSortieMaillage {
-    void (*cree_un_maillage)(void *donnees_utilisateurs, struct ExportriceMaillage *exportrice);
+    void (*cree_un_maillage)(void *donnees_utilisateurs, struct AdaptriceMaillage *exportrice);
     void *donnees_utilisateurs;
 };
 
@@ -243,6 +243,29 @@ struct ParametresVDBVersMaillage {
     float adaptivite;
     float decalage_masque;
     bool inverse_masque;
+
+    /* Options pour la surface de référence. */
+
+    /**
+     * Quand une surface de référence est fournie, ceci définie le seuil d'adaptivité pour les
+     * régions qui se trouvent à l'interieur de la surface (par exemple, les faces internes
+     * générées par une fracture de la surface d'origine).
+     * @min 0.0
+     * @max 1.0
+     */
+    float adaptivite_interne;
+
+    /** Affine les bords et coins du maillage généré.
+     * @défaut vrai
+     */
+    bool affiner_les_traits;
+
+    /** Controle le masque d'adaptivité des bords.
+     * @min 0.0
+     * @max 1.0
+     * @défaut 0.5
+     */
+    float tolerance_de_bord;
 };
 
 void VDB_vers_polygones(struct ContexteKuri *ctx,
