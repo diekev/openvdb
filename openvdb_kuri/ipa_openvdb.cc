@@ -837,6 +837,7 @@ void copyMesh(AdaptriceMaillageVDB &maillage, tools::VolumeToMesh &mesher, const
     /* Exporte les points. */
     const openvdb::tools::PointList &points = mesher.pointList();
 
+    const int decalage_point = maillage.pointCount();
     maillage.ajoutePoints(reinterpret_cast<float *>(points.get()),
                           static_cast<long>(mesher.pointListSize()));
 
@@ -897,10 +898,10 @@ void copyMesh(AdaptriceMaillageVDB &maillage, tools::VolumeToMesh &mesher, const
             const openvdb::Vec4I &quad = polygons.quad(i);
             int flags = (((polygons.quadFlags(i) & exteriorFlag) != 0) << 1) |
                         ((polygons.quadFlags(i) & seamLineFlag) != 0);
-            verts[flags][iquad[flags]++] = quad[0];
-            verts[flags][iquad[flags]++] = quad[1];
-            verts[flags][iquad[flags]++] = quad[2];
-            verts[flags][iquad[flags]++] = quad[3];
+            verts[flags][iquad[flags]++] = quad[0] + decalage_point;
+            verts[flags][iquad[flags]++] = quad[1] + decalage_point;
+            verts[flags][iquad[flags]++] = quad[2] + decalage_point;
+            verts[flags][iquad[flags]++] = quad[3] + decalage_point;
         }
 
         // Copy triangles (adaptive mesh)
@@ -908,9 +909,9 @@ void copyMesh(AdaptriceMaillageVDB &maillage, tools::VolumeToMesh &mesher, const
             const openvdb::Vec3I &triangle = polygons.triangle(i);
             int flags = (((polygons.triangleFlags(i) & exteriorFlag) != 0) << 1) |
                         ((polygons.triangleFlags(i) & seamLineFlag) != 0);
-            verts[flags][itri[flags]++] = triangle[0];
-            verts[flags][itri[flags]++] = triangle[1];
-            verts[flags][itri[flags]++] = triangle[2];
+            verts[flags][itri[flags]++] = triangle[0] + decalage_point;
+            verts[flags][itri[flags]++] = triangle[1] + decalage_point;
+            verts[flags][itri[flags]++] = triangle[2] + decalage_point;
         }
     }
 
@@ -919,7 +920,7 @@ void copyMesh(AdaptriceMaillageVDB &maillage, tools::VolumeToMesh &mesher, const
     void *groupe_polygones_internes = maillage.creeUnGroupeDePolygones("polygones_internes");
 
     std::vector<int> sommets_par_polygone;
-    long decalage_groupe = 0;
+    long decalage_groupe = maillage.polygonCount();
     for (int flags = 0; flags < 4; ++flags) {
 
         if (!nquads[flags] && !ntris[flags])
