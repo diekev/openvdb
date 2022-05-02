@@ -221,11 +221,6 @@ void VDB_depuis_polygones(struct ContexteKuri *ctx,
                           struct ExportriceGrilles *exportrice,
                           struct Interruptrice *interruptrice);
 
-struct FluxSortieMaillage {
-    void (*cree_un_maillage)(void *donnees_utilisateurs, struct AdaptriceMaillage *exportrice);
-    void *donnees_utilisateurs;
-};
-
 struct IteratriceGrillesVDB {
     struct GrilleVDB *(*suivante)(void *);
 
@@ -271,7 +266,7 @@ struct ParametresVDBVersMaillage {
 void VDB_vers_polygones(struct ContexteKuri *ctx,
                         struct ContexteEvaluationVDB *ctx_eval,
                         struct ParametresVDBVersMaillage *params,
-                        struct FluxSortieMaillage *flux_sortie_maillage,
+                        struct AdaptriceMaillage *maillage,
                         struct Interruptrice *interruptrice);
 
 enum ComportementFichierManquant {

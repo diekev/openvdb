@@ -832,29 +832,11 @@ static void ajoute_champs_adaptivite(EnveloppeContexteEvaluationVDB &ctx_eval,
     mesher.setSpatialAdaptivity(grille);
 }
 
-struct EnveloppeFluxSortieMaillage : public FluxSortieMaillage {
-  public:
-    static EnveloppeFluxSortieMaillage enveloppe(FluxSortieMaillage &flux)
-    {
-        return {flux};
-    }
-
-    AdaptriceMaillageVDB creeUnMaillage()
-    {
-        AdaptriceMaillage exportrice{};
-        this->cree_un_maillage(this->donnees_utilisateurs, &exportrice);
-        return ::enveloppe(&exportrice);
-    }
-};
-
-void copyMesh(EnveloppeFluxSortieMaillage &flux_sortie_maillages,
-              tools::VolumeToMesh &mesher,
-              const char *gridName)
+void copyMesh(AdaptriceMaillageVDB &maillage, tools::VolumeToMesh &mesher, const char *gridName)
 {
     /* Exporte les points. */
     const openvdb::tools::PointList &points = mesher.pointList();
 
-    auto maillage = flux_sortie_maillages.creeUnMaillage();
     maillage.ajoutePoints(reinterpret_cast<float *>(points.get()),
                           static_cast<long>(mesher.pointListSize()));
 
@@ -1240,7 +1222,7 @@ template <typename GridType>
 static void vdb_vers_polygones_reference(ContexteKuri *ctx,
                                          EnveloppeContexteEvaluationVDB &ctx_eval,
                                          ParametresVDBVersMaillage *params,
-                                         EnveloppeFluxSortieMaillage &flux_sortie_maillage,
+                                         AdaptriceMaillageVDB &maillage,
                                          tools::VolumeToMesh &mesher,
                                          std::list<openvdb::GridBase::ConstPtr> const &grids,
                                          InterruptriceVDB &boss)
@@ -1349,15 +1331,17 @@ static void vdb_vers_polygones_reference(ContexteKuri *ctx,
 
         mesher(*grid);
 
-        copyMesh(flux_sortie_maillage, mesher, grid->getName().c_str());
+        copyMesh(maillage, mesher, grid->getName().c_str());
     }
 
     /* Affinage des traits. */
     if (!boss.wasInterrupted() && params->affiner_les_traits) {
-        //        tbb::parallel_for(GA_SplittableRange(gdp->getPointRange()),
-        //                      hvdb::SharpenFeaturesOp(
-        //                          *gdp, *refGeo, edgeData, *transform, surfaceGroup,
-        //                          maskTree.get()));
+        auto refGeo = enveloppe(params->maillage_reference);
+        void *surfaceGroup = maillage.creeUnGroupeDePolygones("polygones_sur_surface");
+        tbb::parallel_for(
+            maillage.plagePoint(),
+            SharpenFeaturesOp(
+                maillage, refGeo, edgeData, *transform, surfaceGroup, maskTree.get()));
     }
 
     // Transfer primitive attributes
@@ -1391,7 +1375,7 @@ static void vdb_vers_polygones_reference(ContexteKuri *ctx,
 void VDB_vers_polygones_impl(ContexteKuri *ctx,
                              EnveloppeContexteEvaluationVDB &ctx_eval,
                              ParametresVDBVersMaillage *params,
-                             FluxSortieMaillage *flux_sortie_maillage,
+                             AdaptriceMaillage *maillage,
                              InterruptriceVDB &boss)
 {
     boss.start("Conversion VDB vers polygones");
@@ -1402,7 +1386,7 @@ void VDB_vers_polygones_impl(ContexteKuri *ctx,
         return;
     }
 
-    auto flux_sortie_maillage_ = EnveloppeFluxSortieMaillage::enveloppe(*flux_sortie_maillage);
+    auto maillage_ = enveloppe(maillage);
 
     tools::VolumeToMesh mesher(params->isovalue, params->adaptivite);
     ajoute_masque_surface(ctx_eval, params, mesher);
@@ -1455,7 +1439,7 @@ void VDB_vers_polygones_impl(ContexteKuri *ctx,
         if (!grids.empty() && !boss.wasInterrupted()) {
             if (grids.front()->isType<openvdb::FloatGrid>()) {
                 vdb_vers_polygones_reference<openvdb::FloatGrid>(
-                    ctx, ctx_eval, params, flux_sortie_maillage_, mesher, grids, boss);
+                    ctx, ctx_eval, params, maillage_, mesher, grids, boss);
             }
 #if 0
             // À FAIRE : double
@@ -1480,7 +1464,7 @@ void VDB_vers_polygones_impl(ContexteKuri *ctx,
             }
 
             grille->grid->apply<ScalarGridTypes>(mesher);
-            copyMesh(flux_sortie_maillage_, mesher, grille->grid->getName().c_str());
+            copyMesh(maillage_, mesher, grille->grid->getName().c_str());
         }
     }
 
@@ -1494,14 +1478,14 @@ void VDB_vers_polygones_impl(ContexteKuri *ctx,
 void VDB_vers_polygones(ContexteKuri *ctx,
                         ContexteEvaluationVDB *ctx_eval,
                         ParametresVDBVersMaillage *params,
-                        FluxSortieMaillage *flux_sortie_maillage,
+                        AdaptriceMaillage *maillage,
                         Interruptrice *interruptrice)
 {
     InterruptriceVDB boss{interruptrice};
     EnveloppeContexteEvaluationVDB ctx_eval_ = enveloppe(ctx_eval);
 
     try {
-        VDB_vers_polygones_impl(ctx, ctx_eval_, params, flux_sortie_maillage, boss);
+        VDB_vers_polygones_impl(ctx, ctx_eval_, params, maillage, boss);
     }
     catch (std::exception &e) {
         ctx_eval_.rapporteErreur(e.what());
