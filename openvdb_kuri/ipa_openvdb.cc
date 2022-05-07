@@ -37,30 +37,9 @@
 #include "../InterfaceCKuri/contexte_kuri.hh"
 #include "Géométrie3D/ipa.h"
 
+#include "outils.hh"
+
 using namespace openvdb::OPENVDB_VERSION_NAME;
-
-/* *********************************************************************** */
-
-namespace outils {
-
-static std::string enchaine(std::vector<std::string> const &chaines, std::string const &separateur)
-{
-    if (chaines.empty()) {
-        return "";
-    }
-
-    std::stringstream os;
-
-    os << chaines[0];
-    for (size_t i = 1; i < chaines.size(); i++) {
-        os << separateur;
-        os << chaines[i];
-    }
-
-    return os.str();
-}
-
-}  // namespace outils
 
 /* *********************************************************************** */
 
@@ -169,198 +148,6 @@ static void exporte_grille_vdb(ContexteKuri *ctx,
     exportrice->ajoute_grille(exportrice->donnees, grille);
 }
 
-/* *********************************************************************** */
-
-struct InterruptriceVDB {
-    Interruptrice *interruptrice = nullptr;
-
-    void start(const char *name = nullptr)
-    {
-        if (interruptrice && interruptrice->commence) {
-            interruptrice->commence(interruptrice->donnees, name);
-        }
-    }
-
-    void end()
-    {
-        if (interruptrice && interruptrice->termine) {
-            interruptrice->termine(interruptrice->donnees);
-        }
-    }
-
-    bool wasInterrupted(int percent = -1)
-    {
-        if (interruptrice && interruptrice->doit_interrompre) {
-            return interruptrice->doit_interrompre(interruptrice->donnees, percent);
-        }
-
-        return false;
-    }
-};
-
-// interface pour OpenVDB
-class AdaptriceMaillageVDB : public AdaptriceMaillage {
-  public:
-    size_t polygonCount() const
-    {
-        return static_cast<size_t>(this->nombre_de_polygones(this->donnees));
-    }
-
-    size_t pointCount() const
-    {
-        return static_cast<size_t>(this->nombre_de_points(this->donnees));
-    }
-
-    size_t vertexCount(size_t n) const
-    {
-        return static_cast<size_t>(
-            this->nombre_de_sommets_polygone(this->donnees, static_cast<long>(n)));
-    }
-
-    void getIndexSpacePoint(size_t n, size_t v, math::Vec3d &pos) const
-    {
-        float x, y, z;
-        this->point_pour_sommet_polygone(
-            this->donnees, static_cast<long>(n), static_cast<long>(v), &x, &y, &z);
-        pos.x() = x;
-        pos.y() = y;
-        pos.z() = z;
-    }
-
-    math::Vec3d getPoint(long n) const
-    {
-        float x, y, z;
-        this->point_pour_index(this->donnees, static_cast<long>(n), &x, &y, &z);
-        math::Vec3d pos;
-        pos.x() = x;
-        pos.y() = y;
-        pos.z() = z;
-        return pos;
-    }
-
-    void setPoint(long n, math::Vec3d const &point)
-    {
-        this->remplace_point_a_l_index(this->donnees,
-                                       n,
-                                       static_cast<float>(point.x()),
-                                       static_cast<float>(point.y()),
-                                       static_cast<float>(point.z()));
-    }
-
-    void indexSommetsPolygone(long n, int *index) const
-    {
-        this->index_points_sommets_polygone(this->donnees, n, index);
-    }
-
-    void rafinePolygone(long i, const RafineusePolygone &rafineuse) const
-    {
-        if (!this->rafine_polygone) {
-            return;
-        }
-        this->rafine_polygone(this->donnees, i, &rafineuse);
-    }
-
-    math::BBox<Vec3d> getBoundBox() const
-    {
-        float min_x = std::numeric_limits<float>::max();
-        float min_y = std::numeric_limits<float>::max();
-        float min_z = std::numeric_limits<float>::max();
-        float max_x = -std::numeric_limits<float>::max();
-        float max_y = -std::numeric_limits<float>::max();
-        float max_z = -std::numeric_limits<float>::max();
-        this->calcule_boite_englobante(
-            this->donnees, &min_x, &min_y, &min_z, &max_x, &max_y, &max_z);
-        Vec3d min = Vec3d(min_x, min_y, min_z);
-        Vec3d max = Vec3d(max_x, max_y, max_z);
-        return {min, max};
-    }
-
-    Vec3s normalPolygone(size_t i) const
-    {
-        float nx, ny, nz;
-        this->calcule_normal_polygone(this->donnees, static_cast<long>(i), &nx, &ny, &nz);
-        return {nx, ny, nz};
-    }
-
-    void ajoutePoints(float *points, long nombre) const
-    {
-        if (this->ajoute_plusieurs_points) {
-            this->ajoute_plusieurs_points(this->donnees, points, nombre);
-            return;
-        }
-
-        reserveNombreDePoints(nombre);
-
-        for (int i = 0; i < nombre; i++) {
-            ajouteUnPoint(points[0], points[1], points[2]);
-            points += 3;
-        }
-    }
-
-    void reserveNombreDePoints(long nombre) const
-    {
-        this->reserve_nombre_de_points(this->donnees, nombre);
-    }
-
-    void reserveNombreDePolygones(long nombre) const
-    {
-        this->reserve_nombre_de_polygones(this->donnees, nombre);
-    }
-
-    void ajouteUnPoint(float x, float y, float z) const
-    {
-        this->ajoute_un_point(this->donnees, x, y, z);
-    }
-
-    void ajouteListePolygones(int *sommets, int *sommets_par_polygones, long nombre_polygones)
-    {
-        this->ajoute_liste_polygones(
-            this->donnees, sommets, sommets_par_polygones, nombre_polygones);
-    }
-
-    void ajouteUnPolygone(int *sommets, int taille) const
-    {
-        this->ajoute_un_polygone(this->donnees, sommets, taille);
-    }
-
-    void *creeUnGroupeDePoints(const std::string &nom) const
-    {
-        return this->cree_un_groupe_de_points(
-            this->donnees, nom.c_str(), static_cast<long>(nom.size()));
-    }
-
-    void *creeUnGroupeDePolygones(const std::string &nom) const
-    {
-        return this->cree_un_groupe_de_polygones(
-            this->donnees, nom.c_str(), static_cast<long>(nom.size()));
-    }
-
-    void ajouteAuGroupe(void *poignee_groupe, long index) const
-    {
-        this->ajoute_au_groupe(poignee_groupe, index);
-    }
-
-    void ajoutePlageAuGroupe(void *poignee_groupe, long index_debut, long index_fin) const
-    {
-        this->ajoute_plage_au_groupe(poignee_groupe, index_debut, index_fin);
-    }
-
-    bool groupePolygonePossedePoint(const void *poignee_groupe, long index) const
-    {
-        return this->groupe_polygone_possede_point(poignee_groupe, index);
-    }
-
-    tbb::blocked_range<long> plagePoint() const
-    {
-        return tbb::blocked_range<long>(0, static_cast<long>(pointCount()));
-    }
-};
-
-static AdaptriceMaillageVDB enveloppe(AdaptriceMaillage *adaptrice)
-{
-    return {*adaptrice};
-}
-
 #if 0
 enum DrapeauxVDBDepuisMaillage {
     CHAMPS_DISTANCE_ABSOLUE = 1,
@@ -390,25 +177,25 @@ static float calcule_taille_voxel_effective(const ParametresVDBDepuisMaillage &p
         }
         case MethodeCalculTailleVoxel::SOUS_DIVISION_AXE_X:
         {
-            const auto bbox = enveloppe(params.adaptrice).getBoundBox();
+            const auto bbox = AdaptriceMaillageVDB::enveloppe(params.adaptrice).getBoundBox();
             const float taille_x = bbox.extents().x();
             return taille_voxel_depuis_compte(taille_x);
         }
         case MethodeCalculTailleVoxel::SOUS_DIVISION_AXE_Y:
         {
-            const auto bbox = enveloppe(params.adaptrice).getBoundBox();
+            const auto bbox = AdaptriceMaillageVDB::enveloppe(params.adaptrice).getBoundBox();
             const float taille_y = bbox.extents().y();
             return taille_voxel_depuis_compte(taille_y);
         }
         case MethodeCalculTailleVoxel::SOUS_DIVISION_AXE_Z:
         {
-            const auto bbox = enveloppe(params.adaptrice).getBoundBox();
+            const auto bbox = AdaptriceMaillageVDB::enveloppe(params.adaptrice).getBoundBox();
             const float taille_z = bbox.extents().z();
             return taille_voxel_depuis_compte(taille_z);
         }
         case MethodeCalculTailleVoxel::SOUS_DIVISION_GRAND_AXE:
         {
-            const auto bbox = enveloppe(params.adaptrice).getBoundBox();
+            const auto bbox = AdaptriceMaillageVDB::enveloppe(params.adaptrice).getBoundBox();
             const float taille_max = std::max(bbox.extents().x(),
                                               std::max(bbox.extents().y(), bbox.extents().z()));
             return taille_voxel_depuis_compte(taille_max);
@@ -551,58 +338,6 @@ static std::vector<Vec4I> extrait_quads_et_triangles(const AdaptriceMaillageVDB 
     return resultat;
 }
 
-struct EnveloppeContexteEvaluation : public ContexteEvaluation {
-    template <typename... Args>
-    void rapporteErreur(Args... args)
-    {
-        std::ostringstream ostr;
-        ((ostr << args), ...);
-        this->rapporteErreur(ostr.str());
-    }
-
-    void rapporteErreur(const std::string &erreur)
-    {
-        if (!this->rapporte_erreur) {
-            return;
-        }
-
-        this->rapporte_erreur(
-            this->donnees_utilisateur, erreur.c_str(), static_cast<long>(erreur.size()));
-    }
-    template <typename... Args>
-    void rapporteAvertissement(Args... args)
-    {
-        std::ostringstream ostr;
-        ((ostr << args), ...);
-        this->rapporteAvertissement(ostr.str());
-    }
-
-    void rapporteAvertissement(const std::string &avertissement)
-    {
-        if (!this->rapporte_avertissement) {
-            return;
-        }
-        this->rapporte_avertissement(this->donnees_utilisateur,
-                                     avertissement.c_str(),
-                                     static_cast<long>(avertissement.size()));
-    }
-};
-
-static EnveloppeContexteEvaluation enveloppe(ContexteEvaluation *ctx)
-{
-    return {*ctx};
-}
-
-static std::string chaine_depuis_accesseuse(AccesseuseChaine *accesseuse)
-{
-    char *nom = nullptr;
-    long taille = 0;
-    if (accesseuse->accede_chaine) {
-        accesseuse->accede_chaine(accesseuse->donnees, &nom, &taille);
-    }
-    return std::string(nom, static_cast<size_t>(taille));
-}
-
 /* Utilisée pour que des fonctions qui appelent VDB_depuis_polygones_impl puissent extraire
  * certaines données locales. */
 struct ExtractionDonneesVDBDepuisPolygones {
@@ -648,7 +383,7 @@ static void VDB_depuis_polygones_impl(ContexteKuri *ctx,
         return;
     }
 
-    AdaptriceMaillageVDB adaptrice_vdb = enveloppe(params->adaptrice);
+    AdaptriceMaillageVDB adaptrice_vdb = AdaptriceMaillageVDB::enveloppe(params->adaptrice);
 
     std::vector<Vec3s> points = extrait_points(adaptrice_vdb, *transform);
     std::vector<Vec4I> polygones = extrait_quads_et_triangles(adaptrice_vdb);
@@ -697,8 +432,10 @@ static void VDB_depuis_polygones_impl(ContexteKuri *ctx,
     }
 
     if (!boss.wasInterrupted() && params->genere_champs_de_distance && exportrice) {
-        exporte_grille_vdb(
-            ctx, exportrice, grille, chaine_depuis_accesseuse(params->nom_champs_distance));
+        exporte_grille_vdb(ctx,
+                           exportrice,
+                           grille,
+                           outils::chaine_depuis_accesseuse(params->nom_champs_distance));
     }
 
     if (params->genere_volume_dense && params->champs_distance_absolue) {
@@ -719,8 +456,10 @@ static void VDB_depuis_polygones_impl(ContexteKuri *ctx,
 
         tools::sdfToFogVolume(*grille_fog);
 
-        exporte_grille_vdb(
-            ctx, exportrice, grille_fog, chaine_depuis_accesseuse(params->nom_volume_dense));
+        exporte_grille_vdb(ctx,
+                           exportrice,
+                           grille_fog,
+                           outils::chaine_depuis_accesseuse(params->nom_volume_dense));
     }
 
     if (!boss.wasInterrupted() && params->transfere_attributs) {
@@ -741,7 +480,7 @@ void VDB_depuis_polygones(ContexteKuri *ctx,
                           Interruptrice *interruptrice)
 {
     InterruptriceVDB boss{interruptrice};
-    EnveloppeContexteEvaluation ctx_eval_ = enveloppe(ctx_eval);
+    EnveloppeContexteEvaluation ctx_eval_ = EnveloppeContexteEvaluation::enveloppe(ctx_eval);
 
     try {
         VDB_depuis_polygones_impl(ctx, ctx_eval_, params, exportrice, boss);
@@ -1292,7 +1031,7 @@ static void vdb_vers_polygones_reference(ContexteKuri *ctx,
         openvdb::tree::LeafManager<BoolTreeType> maskLeafs(*maskTree);
 
         GenAdaptivityMaskOp<typename IntGridT::TreeType, BoolTreeType> op(
-            enveloppe(params->maillage_reference),
+            AdaptriceMaillageVDB::enveloppe(params->maillage_reference),
             indexGrid->tree(),
             maskLeafs,
             params->tolerance_de_bord);
@@ -1342,7 +1081,7 @@ static void vdb_vers_polygones_reference(ContexteKuri *ctx,
 
     /* Affinage des traits. */
     if (!boss.wasInterrupted() && params->affiner_les_traits) {
-        auto refGeo = enveloppe(params->maillage_reference);
+        auto refGeo = AdaptriceMaillageVDB::enveloppe(params->maillage_reference);
         void *surfaceGroup = maillage.creeUnGroupeDePolygones("polygones_sur_surface");
         tbb::parallel_for(
             maillage.plagePoint(),
@@ -1392,7 +1131,7 @@ void VDB_vers_polygones_impl(ContexteKuri *ctx,
         return;
     }
 
-    auto maillage_ = enveloppe(maillage);
+    auto maillage_ = AdaptriceMaillageVDB::enveloppe(maillage);
 
     tools::VolumeToMesh mesher(params->isovalue, params->adaptivite);
     ajoute_masque_surface(ctx_eval, params, mesher);
@@ -1488,7 +1227,7 @@ void VDB_vers_polygones(ContexteKuri *ctx,
                         Interruptrice *interruptrice)
 {
     InterruptriceVDB boss{interruptrice};
-    EnveloppeContexteEvaluation ctx_eval_ = enveloppe(ctx_eval);
+    EnveloppeContexteEvaluation ctx_eval_ = EnveloppeContexteEvaluation::enveloppe(ctx_eval);
 
     try {
         VDB_vers_polygones_impl(ctx, ctx_eval_, params, maillage, boss);
@@ -1588,7 +1327,7 @@ static void VDB_depuis_fichier_impl(ContexteKuri *ctx,
 {
     boss.start("Lecture d'un fichier OpenVDB");
 
-    const std::string chemin_fichier = chaine_depuis_accesseuse(params->chemin_fichier);
+    const std::string chemin_fichier = outils::chaine_depuis_accesseuse(params->chemin_fichier);
     const Index64 limite_copie = static_cast<Index64>(1.0e9 * params->limite_pour_copier);
 
     io::File fichier(chemin_fichier);
@@ -1603,7 +1342,8 @@ static void VDB_depuis_fichier_impl(ContexteKuri *ctx,
     bool rogne = params->rogne;
     BBoxd boite_rognage;
     if (rogne && params->maillage_reference) {
-        AdaptriceMaillageVDB maillage = enveloppe(params->maillage_reference);
+        AdaptriceMaillageVDB maillage = AdaptriceMaillageVDB::enveloppe(
+            params->maillage_reference);
         boite_rognage = maillage.getBoundBox();
         rogne = boite_rognage.isSorted();
     }
@@ -1660,7 +1400,7 @@ void VDB_depuis_fichier(struct ContexteKuri *ctx,
                         struct Interruptrice *interruptrice)
 {
     InterruptriceVDB boss{interruptrice};
-    EnveloppeContexteEvaluation ctx_eval_ = enveloppe(ctx_eval);
+    EnveloppeContexteEvaluation ctx_eval_ = EnveloppeContexteEvaluation::enveloppe(ctx_eval);
 
     try {
         VDB_depuis_fichier_impl(ctx, ctx_eval_, params, flux_sortie_grille, boss);

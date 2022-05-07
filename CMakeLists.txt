@@ -594,8 +594,10 @@ set(BIBLIOTHEQUES
 
 set(SOURCES
     openvdb_kuri/ipa_openvdb.cc
+    openvdb_kuri/outils.cc
 
     openvdb_kuri/ipa_openvdb.h
+    openvdb_kuri/outils.hh
 
     ${CMAKE_CURRENT_SOURCE_DIR}/../InterfaceCKuri/contexte_kuri.hh
 )
