@@ -585,6 +585,7 @@ set(INCLUSIONS
     ${CMAKE_CURRENT_SOURCE_DIR}/openvdb/
     ${CMAKE_CURRENT_BINARY_DIR}/openvdb/openvdb/
     ${CMAKE_CURRENT_BINARY_DIR}/openvdb/openvdb/openvdb/
+    ${CMAKE_CURRENT_SOURCE_DIR}/../
     ${Boost_INCLUDE_DIR}
 )
 

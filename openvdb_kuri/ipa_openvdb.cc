@@ -35,6 +35,7 @@
 #include "openvdb/tools/VolumeToMesh.h"
 
 #include "../InterfaceCKuri/contexte_kuri.hh"
+#include "Géométrie3D/ipa.h"
 
 using namespace openvdb::OPENVDB_VERSION_NAME;
 
@@ -126,33 +127,33 @@ void VDB_mute_nom_grille(struct GrilleVDB *grille, const char *nom, long taille)
 TypeVolume VDB_type_volume_pour_grille(GrilleVDB *grille)
 {
     if (!grille) {
-        return TypeVolume::INVALIDE;
+        return VOLUME_INVALIDE;
     }
 
     GridBase::ConstPtr grille_vdb = grille->grid;
     if (!grille_vdb) {
-        return TypeVolume::INVALIDE;
+        return VOLUME_INVALIDE;
     }
 
 #define VERIFIE_TYPE_ET_RETOURNE(GridType, type_volume)                                           \
     if (grille_vdb->isType<GridType>()) {                                                         \
-        return TypeVolume::type_volume;                                                           \
+        return type_volume;                                                                       \
     }
 
-    VERIFIE_TYPE_ET_RETOURNE(FloatGrid, R32)
-    VERIFIE_TYPE_ET_RETOURNE(DoubleGrid, R64)
-    VERIFIE_TYPE_ET_RETOURNE(Int32Grid, Z32)
-    VERIFIE_TYPE_ET_RETOURNE(Int64Grid, Z64)
-    VERIFIE_TYPE_ET_RETOURNE(BoolGrid, BOOL)
-    VERIFIE_TYPE_ET_RETOURNE(Vec3SGrid, VEC3_R32)
-    VERIFIE_TYPE_ET_RETOURNE(Vec3DGrid, VEC3_R64)
-    VERIFIE_TYPE_ET_RETOURNE(Vec3IGrid, VEC3_Z32)
-    VERIFIE_TYPE_ET_RETOURNE(tools::PointIndexGrid, INDEX_POINT)
-    VERIFIE_TYPE_ET_RETOURNE(points::PointDataGrid, DONNEES_POINT)
+    VERIFIE_TYPE_ET_RETOURNE(FloatGrid, VOLUME_R32)
+    VERIFIE_TYPE_ET_RETOURNE(DoubleGrid, VOLUME_R64)
+    VERIFIE_TYPE_ET_RETOURNE(Int32Grid, VOLUME_Z32)
+    VERIFIE_TYPE_ET_RETOURNE(Int64Grid, VOLUME_Z64)
+    VERIFIE_TYPE_ET_RETOURNE(BoolGrid, VOLUME_BOOL)
+    VERIFIE_TYPE_ET_RETOURNE(Vec3SGrid, VOLUME_VEC3_R32)
+    VERIFIE_TYPE_ET_RETOURNE(Vec3DGrid, VOLUME_VEC3_R64)
+    VERIFIE_TYPE_ET_RETOURNE(Vec3IGrid, VOLUME_VEC3_Z32)
+    VERIFIE_TYPE_ET_RETOURNE(tools::PointIndexGrid, VOLUME_INDEX_POINT)
+    VERIFIE_TYPE_ET_RETOURNE(points::PointDataGrid, VOLUME_DONNEES_POINT)
 
 #undef VERIFIE_TYPE_ET_RETOURNE
 
-    return TypeVolume::INVALIDE;
+    return VOLUME_INVALIDE;
 }
 
 /* *********************************************************************** */
@@ -451,7 +452,7 @@ static std::vector<DonneesCreationGrilleAttribut> parse_attributs_a_transferer(
         }
 
         TypeVolume type_volume = accesseuse->type_volume_pour_attribut(poignee);
-        if (type_volume == TypeVolume::INVALIDE) {
+        if (type_volume == VOLUME_INVALIDE) {
             continue;
         }
 
@@ -484,6 +485,10 @@ static std::vector<Vec3s> extrait_points(const AdaptriceMaillageVDB &adaptrice_v
     return resultat;
 }
 
+struct RafineusePolygoneVDB : public RafineusePolygone {
+    std::vector<Vec4I> *polygones = nullptr;
+};
+
 static std::vector<Vec4I> extrait_quads_et_triangles(const AdaptriceMaillageVDB &adaptrice_vdb)
 {
     std::vector<Vec4I> resultat;
@@ -495,15 +500,15 @@ static std::vector<Vec4I> extrait_quads_et_triangles(const AdaptriceMaillageVDB 
 
     resultat.reserve(nombre_de_primitives);
 
-    RafineusePolygone rafineuse;
-    rafineuse.donnees = &resultat;
+    RafineusePolygoneVDB rafineuse;
+    rafineuse.polygones = &resultat;
     rafineuse.ajoute_triangle = [](RafineusePolygone *raf, long v0, long v1, long v2) {
         Vec4I triangle;
         triangle.x() = static_cast<int>(v0);
         triangle.y() = static_cast<int>(v1);
         triangle.z() = static_cast<int>(v2);
         triangle.w() = util::INVALID_IDX;
-        static_cast<std::vector<Vec4I> *>(raf->donnees)->push_back(triangle);
+        static_cast<RafineusePolygoneVDB *>(raf)->polygones->push_back(triangle);
     };
     rafineuse.ajoute_quadrilatere =
         [](RafineusePolygone *raf, long v0, long v1, long v2, long v3) {
@@ -512,7 +517,7 @@ static std::vector<Vec4I> extrait_quads_et_triangles(const AdaptriceMaillageVDB 
             triangle.y() = static_cast<int>(v1);
             triangle.z() = static_cast<int>(v2);
             triangle.w() = static_cast<int>(v3);
-            static_cast<std::vector<Vec4I> *>(raf->donnees)->push_back(triangle);
+            static_cast<RafineusePolygoneVDB *>(raf)->polygones->push_back(triangle);
         };
 
     for (int i = 0; i < nombre_de_primitives; i++) {
@@ -546,7 +551,7 @@ static std::vector<Vec4I> extrait_quads_et_triangles(const AdaptriceMaillageVDB 
     return resultat;
 }
 
-struct EnveloppeContexteEvaluationVDB : public ContexteEvaluationVDB {
+struct EnveloppeContexteEvaluation : public ContexteEvaluation {
     template <typename... Args>
     void rapporteErreur(Args... args)
     {
@@ -583,7 +588,7 @@ struct EnveloppeContexteEvaluationVDB : public ContexteEvaluationVDB {
     }
 };
 
-static EnveloppeContexteEvaluationVDB enveloppe(ContexteEvaluationVDB *ctx)
+static EnveloppeContexteEvaluation enveloppe(ContexteEvaluation *ctx)
 {
     return {*ctx};
 }
@@ -607,7 +612,7 @@ struct ExtractionDonneesVDBDepuisPolygones {
 };
 
 static void VDB_depuis_polygones_impl(ContexteKuri *ctx,
-                                      EnveloppeContexteEvaluationVDB &ctx_eval_,
+                                      EnveloppeContexteEvaluation &ctx_eval_,
                                       ParametresVDBDepuisMaillage *params,
                                       ExportriceGrilles *exportrice,
                                       InterruptriceVDB &boss,
@@ -730,13 +735,13 @@ static void VDB_depuis_polygones_impl(ContexteKuri *ctx,
 }
 
 void VDB_depuis_polygones(ContexteKuri *ctx,
-                          ContexteEvaluationVDB *ctx_eval,
+                          ContexteEvaluation *ctx_eval,
                           ParametresVDBDepuisMaillage *params,
                           ExportriceGrilles *exportrice,
                           Interruptrice *interruptrice)
 {
     InterruptriceVDB boss{interruptrice};
-    EnveloppeContexteEvaluationVDB ctx_eval_ = enveloppe(ctx_eval);
+    EnveloppeContexteEvaluation ctx_eval_ = enveloppe(ctx_eval);
 
     try {
         VDB_depuis_polygones_impl(ctx, ctx_eval_, params, exportrice, boss);
@@ -791,7 +796,7 @@ inline GridBase::ConstPtr getMaskFromGrid(const GridBase::ConstPtr &gridPtr, dou
     return op.outGridPtr;
 }
 
-static void ajoute_masque_surface(EnveloppeContexteEvaluationVDB &ctx_eval,
+static void ajoute_masque_surface(EnveloppeContexteEvaluation &ctx_eval,
                                   ParametresVDBVersMaillage *params,
                                   tools::VolumeToMesh &mesher)
 {
@@ -810,7 +815,7 @@ static void ajoute_masque_surface(EnveloppeContexteEvaluationVDB &ctx_eval,
     mesher.setSurfaceMask(grille_masque, params->inverse_masque);
 }
 
-static void ajoute_champs_adaptivite(EnveloppeContexteEvaluationVDB &ctx_eval,
+static void ajoute_champs_adaptivite(EnveloppeContexteEvaluation &ctx_eval,
                                      ParametresVDBVersMaillage *params,
                                      tools::VolumeToMesh &mesher)
 {
@@ -823,7 +828,7 @@ static void ajoute_champs_adaptivite(EnveloppeContexteEvaluationVDB &ctx_eval,
         return;
     }
 
-    if (VDB_type_volume_pour_grille(params->grille_champs_adaptivite) != TypeVolume::R32) {
+    if (VDB_type_volume_pour_grille(params->grille_champs_adaptivite) != VOLUME_R32) {
         ctx_eval.rapporteAvertissement("La grille du champs d'adaptivité n'est pas de type réel");
         return;
     }
@@ -1221,7 +1226,7 @@ void SharpenFeaturesOp::operator()(const tbb::blocked_range<long> &range) const
 
 template <typename GridType>
 static void vdb_vers_polygones_reference(ContexteKuri *ctx,
-                                         EnveloppeContexteEvaluationVDB &ctx_eval,
+                                         EnveloppeContexteEvaluation &ctx_eval,
                                          ParametresVDBVersMaillage *params,
                                          AdaptriceMaillageVDB &maillage,
                                          tools::VolumeToMesh &mesher,
@@ -1374,7 +1379,7 @@ static void vdb_vers_polygones_reference(ContexteKuri *ctx,
 }
 
 void VDB_vers_polygones_impl(ContexteKuri *ctx,
-                             EnveloppeContexteEvaluationVDB &ctx_eval,
+                             EnveloppeContexteEvaluation &ctx_eval,
                              ParametresVDBVersMaillage *params,
                              AdaptriceMaillage *maillage,
                              InterruptriceVDB &boss)
@@ -1477,13 +1482,13 @@ void VDB_vers_polygones_impl(ContexteKuri *ctx,
 }
 
 void VDB_vers_polygones(ContexteKuri *ctx,
-                        ContexteEvaluationVDB *ctx_eval,
+                        ContexteEvaluation *ctx_eval,
                         ParametresVDBVersMaillage *params,
                         AdaptriceMaillage *maillage,
                         Interruptrice *interruptrice)
 {
     InterruptriceVDB boss{interruptrice};
-    EnveloppeContexteEvaluationVDB ctx_eval_ = enveloppe(ctx_eval);
+    EnveloppeContexteEvaluation ctx_eval_ = enveloppe(ctx_eval);
 
     try {
         VDB_vers_polygones_impl(ctx, ctx_eval_, params, maillage, boss);
@@ -1576,7 +1581,7 @@ void VDB_depuis_particules(AdaptricePoints *adaptrice,
 }
 
 static void VDB_depuis_fichier_impl(ContexteKuri *ctx,
-                                    EnveloppeContexteEvaluationVDB &ctx_eval,
+                                    EnveloppeContexteEvaluation &ctx_eval,
                                     ParametresLectureVDB *params,
                                     ExportriceGrilles *flux_sortie_grille,
                                     InterruptriceVDB &boss)
@@ -1649,13 +1654,13 @@ static void VDB_depuis_fichier_impl(ContexteKuri *ctx,
 }
 
 void VDB_depuis_fichier(struct ContexteKuri *ctx,
-                        struct ContexteEvaluationVDB *ctx_eval,
+                        struct ContexteEvaluation *ctx_eval,
                         struct ParametresLectureVDB *params,
                         struct ExportriceGrilles *flux_sortie_grille,
                         struct Interruptrice *interruptrice)
 {
     InterruptriceVDB boss{interruptrice};
-    EnveloppeContexteEvaluationVDB ctx_eval_ = enveloppe(ctx_eval);
+    EnveloppeContexteEvaluation ctx_eval_ = enveloppe(ctx_eval);
 
     try {
         VDB_depuis_fichier_impl(ctx, ctx_eval_, params, flux_sortie_grille, boss);

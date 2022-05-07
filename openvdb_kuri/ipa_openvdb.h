@@ -30,22 +30,24 @@ extern "C" {
 typedef char bool;
 #endif
 
+struct AdaptriceMaillage;
+struct ContexteEvaluation;
 struct ContexteKuri;
-
 struct GrilleVDB;
+struct Interruptrice;
 
 enum TypeVolume {
-    INVALIDE = 0,
-    R32 = 1,
-    R64 = 2,
-    Z32 = 3,
-    Z64 = 4,
-    BOOL = 5,
-    VEC3_R32 = 6,
-    VEC3_R64 = 7,
-    VEC3_Z32 = 8,
-    INDEX_POINT = 9,
-    DONNEES_POINT = 10,
+    VOLUME_INVALIDE = 0,
+    VOLUME_R32 = 1,
+    VOLUME_R64 = 2,
+    VOLUME_Z32 = 3,
+    VOLUME_Z64 = 4,
+    VOLUME_BOOL = 5,
+    VOLUME_VEC3_R32 = 6,
+    VOLUME_VEC3_R64 = 7,
+    VOLUME_VEC3_Z32 = 8,
+    VOLUME_INDEX_POINT = 9,
+    VOLUME_DONNEES_POINT = 10,
 };
 
 struct GrilleVDB *VDB_copie_grille(struct ContexteKuri *ctx, struct GrilleVDB *grille);
@@ -56,70 +58,6 @@ enum TypeVolume VDB_type_volume_pour_grille(struct GrilleVDB *grille);
 
 struct ExportriceGrilles {
     void (*ajoute_grille)(void *, struct GrilleVDB *);
-    void *donnees;
-};
-
-/* Structure de rappels pour gérer les longs calculs. Ceci sert à interrompre au besoin lesdits
- * longs calculs. */
-struct Interruptrice {
-    void (*commence)(void *, const char *message);
-    void (*termine)(void *);
-    bool (*doit_interrompre)(void *, int pourcentage);
-    void *donnees;
-};
-
-/* Structure servant à rafiner les polygones n'étant ni des triangles, ni des quadrilatères,
- * les algorithmes d'OpenVDB ne prennant pas d'autres polygones en entrée. */
-struct RafineusePolygone {
-    void (*ajoute_triangle)(struct RafineusePolygone *, long v1, long v2, long v3);
-    void (*ajoute_quadrilatere)(struct RafineusePolygone *, long v1, long v2, long v3, long v4);
-
-    void *donnees;
-};
-
-struct AdaptriceMaillage {
-#ifdef __cplusplus
-  protected:
-#endif
-    long (*nombre_de_polygones)(void *);
-    long (*nombre_de_points)(void *);
-    long (*nombre_de_sommets_polygone)(void *, long n);
-
-    void (*point_pour_index)(void *, long n, float *x, float *y, float *z);
-    void (*remplace_point_a_l_index)(void *, long n, float x, float y, float z);
-
-    void (*point_pour_sommet_polygone)(void *, long p, long s, float *x, float *y, float *z);
-    void (*index_points_sommets_polygone)(void *, long n, int *index);
-
-    /* Appelée si un polygone possède plus que 4 sommet afin que l'application cliente définissent
-     * comment rafiner ces polygones. */
-    void (*rafine_polygone)(void *, long n, const struct RafineusePolygone *);
-
-    void (*calcule_boite_englobante)(void *,
-                                     float *min_x,
-                                     float *min_y,
-                                     float *min_z,
-                                     float *max_x,
-                                     float *max_y,
-                                     float *max_z);
-
-    void (*calcule_normal_polygone)(void *, long p, float *nx, float *ny, float *nz);
-    void (*reserve_nombre_de_points)(void *, long nombre);
-    void (*reserve_nombre_de_polygones)(void *, long nombre);
-    void (*ajoute_plusieurs_points)(void *, float *points, long nombre);
-    void (*ajoute_un_point)(void *, float x, float y, float z);
-    void (*ajoute_un_polygone)(void *, int *sommets, int taille);
-    void (*ajoute_liste_polygones)(void *,
-                                   int *sommets,
-                                   int *sommets_par_polygone,
-                                   long nombre_polygones);
-
-    void *(*cree_un_groupe_de_points)(void *donnees, const char *nom, long taille_nom);
-    void *(*cree_un_groupe_de_polygones)(void *donnees, const char *nom, long taille_nom);
-    void (*ajoute_au_groupe)(void *poignee_groupe, long index);
-    void (*ajoute_plage_au_groupe)(void *poignee_groupe, long index_debut, long index_fin);
-    bool (*groupe_polygone_possede_point)(const void *poignee_groupe, long index);
-
     void *donnees;
 };
 
@@ -208,15 +146,8 @@ struct ParametresVDBDepuisMaillage {
     int compte_voxel_bande_interieure;
 };
 
-struct ContexteEvaluationVDB {
-    void (*rapporte_erreur)(void *, const char *, long);
-    void (*rapporte_avertissement)(void *, const char *, long);
-
-    void *donnees_utilisateur;
-};
-
 void VDB_depuis_polygones(struct ContexteKuri *ctx,
-                          struct ContexteEvaluationVDB *ctx_eval,
+                          struct ContexteEvaluation *ctx_eval,
                           struct ParametresVDBDepuisMaillage *params,
                           struct ExportriceGrilles *exportrice,
                           struct Interruptrice *interruptrice);
@@ -264,7 +195,7 @@ struct ParametresVDBVersMaillage {
 };
 
 void VDB_vers_polygones(struct ContexteKuri *ctx,
-                        struct ContexteEvaluationVDB *ctx_eval,
+                        struct ContexteEvaluation *ctx_eval,
                         struct ParametresVDBVersMaillage *params,
                         struct AdaptriceMaillage *maillage,
                         struct Interruptrice *interruptrice);
@@ -309,7 +240,7 @@ struct ParametresLectureVDB {
 };
 
 void VDB_depuis_fichier(struct ContexteKuri *ctx,
-                        struct ContexteEvaluationVDB *ctx_eval,
+                        struct ContexteEvaluation *ctx_eval,
                         struct ParametresLectureVDB *params,
                         struct ExportriceGrilles *flux_sortie_grille,
                         struct Interruptrice *interruptrice);
