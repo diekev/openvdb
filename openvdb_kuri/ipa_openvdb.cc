@@ -39,7 +39,7 @@
 
 #include "outils.hh"
 
-using namespace openvdb::OPENVDB_VERSION_NAME;
+using namespace openvdb;
 
 /* *********************************************************************** */
 
