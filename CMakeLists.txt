@@ -586,6 +586,7 @@ set(INCLUSIONS
     ${CMAKE_CURRENT_BINARY_DIR}/openvdb/openvdb/
     ${CMAKE_CURRENT_BINARY_DIR}/openvdb/openvdb/openvdb/
     ${CMAKE_CURRENT_SOURCE_DIR}/../
+    ${CMAKE_CURRENT_SOURCE_DIR}/../../../../
     ${Boost_INCLUDE_DIR}
 )
 
@@ -596,10 +597,12 @@ set(SOURCES
     openvdb_kuri/grille_vdb.cc
     openvdb_kuri/ipa_openvdb.cc
     openvdb_kuri/outils.cc
+    openvdb_kuri/points_depuis_vdb.cc
 
     openvdb_kuri/grille_vdb.hh
     openvdb_kuri/ipa_openvdb.h
     openvdb_kuri/outils.hh
+    openvdb_kuri/points_depuis_vdb.hh
 
     ${CMAKE_CURRENT_SOURCE_DIR}/../InterfaceCKuri/contexte_kuri.hh
 )

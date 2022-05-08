@@ -39,6 +39,7 @@
 
 #include "grille_vdb.hh"
 #include "outils.hh"
+#include "points_depuis_vdb.hh"
 
 using namespace openvdb;
 
@@ -1373,6 +1374,22 @@ void VDB_depuis_fichier(struct ContexteKuri *ctx,
         else {
             ctx_eval_.rapporteAvertissement(message);
         }
+    }
+    catch (std::exception &e) {
+        ctx_eval_.rapporteErreur(e.what());
+    }
+}
+
+void VDB_distribue_points(ContexteKuri *ctx,
+                          ContexteEvaluation *ctx_eval,
+                          ParametresPointsDepuisVDB *params,
+                          Interruptrice *interruptrice)
+{
+    InterruptriceVDB boss{interruptrice};
+    EnveloppeContexteEvaluation ctx_eval_ = EnveloppeContexteEvaluation::enveloppe(ctx_eval);
+
+    try {
+        kvdb::points_depuis_vdb(*ctx, ctx_eval_, *params, boss);
     }
     catch (std::exception &e) {
         ctx_eval_.rapporteErreur(e.what());

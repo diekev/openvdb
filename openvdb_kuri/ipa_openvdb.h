@@ -245,6 +245,81 @@ void VDB_depuis_fichier(struct ContexteKuri *ctx,
                         struct ExportriceGrilles *flux_sortie_grille,
                         struct Interruptrice *interruptrice);
 
+/* *************************************************************************** */
+/* Distribution de points.
+ */
+
+enum PolitiqueNommageGrille {
+    GARDE_NOM_ORIGINAL,
+    AJOUTE_SUFFIXE,
+    REMPLACE_NOM,
+};
+
+enum DomaineChampsDeDistance {
+    INTERIEUR,
+    SURFACE,
+    BANDE_FINE,
+};
+
+enum CompressionPoints {
+    NE_COMPRIME_PAS,
+    COMPRIME_SUR_16_BIT,
+    COMPRIME_SUR_8_BIT,
+};
+
+enum ModeGenereationPoints {
+    PAR_COMPTE_TOTAL,
+    PAR_DENSITE_LOCALE,
+    PAR_VOXEL,
+};
+
+struct ParametresPointsDepuisVDB {
+    struct AdaptriceMaillage *sortie_points;
+    struct IteratriceGrillesVDB *groupe_grilles;
+    struct ExportriceGrilles *sortie_grilles;
+
+    /**
+     * Génère une grille de points OpenVDB au lieu de points natifs.
+     */
+    bool genere_grille_points;
+
+    bool rogne_selon_surface;
+
+    bool verbeux;
+
+    int graine;
+
+    float diffusion;
+
+    int nombre_de_points;
+
+    float points_par_voxel;
+
+    float densite;
+
+    bool multiplie_par_densite;
+    enum PolitiqueNommageGrille nommage_grilles_sortie;
+
+    enum DomaineChampsDeDistance domaine_champs_de_distance;
+
+    struct AccesseuseChaine *nom_grille_sortie;
+
+    enum CompressionPoints compression_desiree;
+
+    enum ModeGenereationPoints mode_generation_points;
+
+    float valeur_iso;
+
+    bool cree_groupe;
+
+    struct AccesseuseChaine *nom_groupe_sortie;
+};
+
+void VDB_distribue_points(struct ContexteKuri *ctx,
+                          struct ContexteEvaluation *ctx_eval,
+                          struct ParametresPointsDepuisVDB *params,
+                          struct Interruptrice *interruptrice);
+
 #ifdef __cplusplus
 }
 #endif
