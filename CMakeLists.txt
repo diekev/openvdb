@@ -593,9 +593,11 @@ set(BIBLIOTHEQUES
 )
 
 set(SOURCES
+    openvdb_kuri/grille_vdb.cc
     openvdb_kuri/ipa_openvdb.cc
     openvdb_kuri/outils.cc
 
+    openvdb_kuri/grille_vdb.hh
     openvdb_kuri/ipa_openvdb.h
     openvdb_kuri/outils.hh
 

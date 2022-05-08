@@ -31,11 +31,15 @@
 
 #include <openvdb/math/BBox.h>
 #include <openvdb/math/Vec3.h>
+#include <openvdb/openvdb.h>
+#include <openvdb/points/PointDataGrid.h>
 
 #include <tbb/blocked_range.h>
 
 struct AccesseuseChaine;
 struct Interruptrice;
+struct GrilleVDB;
+struct IteratriceGrillesVDB;
 
 namespace outils {
 
@@ -43,7 +47,26 @@ std::string enchaine(std::vector<std::string> const &chaines, std::string const 
 
 std::string chaine_depuis_accesseuse(AccesseuseChaine *accesseuse);
 
+std::vector<GrilleVDB *> grilles_depuis_iteratrice(IteratriceGrillesVDB &iteratrice);
+
 }  // namespace outils
+
+/* *********************************************************************** */
+
+// Grid type lists, for use with GEO_PrimVDB::apply(), GEOvdbApply(),
+// or openvdb::GridBase::apply()
+
+using ScalarGridTypes = openvdb::TypeList<openvdb::BoolGrid,
+                                          openvdb::FloatGrid,
+                                          openvdb::DoubleGrid,
+                                          openvdb::Int32Grid,
+                                          openvdb::Int64Grid>;
+
+using PointGridTypes = openvdb::TypeList<openvdb::points::PointDataGrid>;
+
+using VolumeGridTypes = ScalarGridTypes::Append<openvdb::Vec3GridTypes>;
+
+using AllGridTypes = VolumeGridTypes::Append<PointGridTypes>;
 
 /* *********************************************************************** */
 

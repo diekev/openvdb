@@ -28,6 +28,7 @@
 
 #include "Géométrie3D/ipa.h"
 
+#include "grille_vdb.hh"
 #include "ipa_openvdb.h"
 
 namespace outils {
@@ -57,6 +58,21 @@ std::string chaine_depuis_accesseuse(AccesseuseChaine *accesseuse)
         accesseuse->accede_chaine(accesseuse->donnees, &nom, &taille);
     }
     return std::string(nom, static_cast<size_t>(taille));
+}
+
+std::vector<GrilleVDB *> grilles_depuis_iteratrice(IteratriceGrillesVDB &iteratrice)
+{
+    std::vector<GrilleVDB *> resultat;
+
+    auto grille = iteratrice.suivante(iteratrice.donnees_utilisateur);
+    while (grille) {
+        if (grille->grid) {
+            resultat.push_back(grille);
+        }
+        grille = iteratrice.suivante(iteratrice.donnees_utilisateur);
+    }
+
+    return resultat;
 }
 
 }  // namespace outils

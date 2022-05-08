@@ -37,32 +37,12 @@
 #include "../InterfaceCKuri/contexte_kuri.hh"
 #include "Géométrie3D/ipa.h"
 
+#include "grille_vdb.hh"
 #include "outils.hh"
 
 using namespace openvdb;
 
 /* *********************************************************************** */
-
-// Grid type lists, for use with GEO_PrimVDB::apply(), GEOvdbApply(),
-// or openvdb::GridBase::apply()
-
-using ScalarGridTypes = openvdb::TypeList<openvdb::BoolGrid,
-                                          openvdb::FloatGrid,
-                                          openvdb::DoubleGrid,
-                                          openvdb::Int32Grid,
-                                          openvdb::Int64Grid>;
-
-using PointGridTypes = openvdb::TypeList<openvdb::points::PointDataGrid>;
-
-using VolumeGridTypes = ScalarGridTypes::Append<Vec3GridTypes>;
-
-using AllGridTypes = VolumeGridTypes::Append<PointGridTypes>;
-
-/* *********************************************************************** */
-
-struct GrilleVDB {
-    GridBase::Ptr grid;
-};
 
 GrilleVDB *VDB_copie_grille(ContexteKuri *ctx, GrilleVDB *grille)
 {
@@ -488,19 +468,6 @@ void VDB_depuis_polygones(ContexteKuri *ctx,
     catch (std::exception &e) {
         ctx_eval_.rapporteErreur(e.what());
     }
-}
-
-static std::vector<GrilleVDB *> grilles_depuis_iteratrice(IteratriceGrillesVDB &iteratrice)
-{
-    std::vector<GrilleVDB *> resultat;
-
-    auto grille = iteratrice.suivante(iteratrice.donnees_utilisateur);
-    while (grille) {
-        resultat.push_back(grille);
-        grille = iteratrice.suivante(iteratrice.donnees_utilisateur);
-    }
-
-    return resultat;
 }
 
 struct InteriorMaskOp {
@@ -1125,7 +1092,7 @@ void VDB_vers_polygones_impl(ContexteKuri *ctx,
 {
     boss.start("Conversion VDB vers polygones");
 
-    auto grilles = grilles_depuis_iteratrice(*params->groupe_grilles);
+    auto grilles = outils::grilles_depuis_iteratrice(*params->groupe_grilles);
     if (grilles.empty()) {
         ctx_eval.rapporteAvertissement("Aucune grille à mailler");
         return;
