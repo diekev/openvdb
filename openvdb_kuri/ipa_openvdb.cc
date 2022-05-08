@@ -117,17 +117,6 @@ TypeVolume VDB_type_volume_pour_grille(GrilleVDB *grille)
 
 /* *********************************************************************** */
 
-static void exporte_grille_vdb(ContexteKuri *ctx,
-                               ExportriceGrilles *exportrice,
-                               GridBase::Ptr grille_vdb,
-                               std::string nom)
-{
-    grille_vdb->setName(nom);
-    GrilleVDB *grille = kuri_loge<GrilleVDB>(ctx);
-    grille->grid = grille_vdb;
-    exportrice->ajoute_grille(exportrice->donnees, grille);
-}
-
 #if 0
 enum DrapeauxVDBDepuisMaillage {
     CHAMPS_DISTANCE_ABSOLUE = 1,
@@ -412,10 +401,10 @@ static void VDB_depuis_polygones_impl(ContexteKuri *ctx,
     }
 
     if (!boss.wasInterrupted() && params->genere_champs_de_distance && exportrice) {
-        exporte_grille_vdb(ctx,
-                           exportrice,
-                           grille,
-                           outils::chaine_depuis_accesseuse(params->nom_champs_distance));
+        outils::exporte_grille_vdb(ctx,
+                                   exportrice,
+                                   grille,
+                                   outils::chaine_depuis_accesseuse(params->nom_champs_distance));
     }
 
     if (params->genere_volume_dense && params->champs_distance_absolue) {
@@ -436,10 +425,10 @@ static void VDB_depuis_polygones_impl(ContexteKuri *ctx,
 
         tools::sdfToFogVolume(*grille_fog);
 
-        exporte_grille_vdb(ctx,
-                           exportrice,
-                           grille_fog,
-                           outils::chaine_depuis_accesseuse(params->nom_volume_dense));
+        outils::exporte_grille_vdb(ctx,
+                                   exportrice,
+                                   grille_fog,
+                                   outils::chaine_depuis_accesseuse(params->nom_volume_dense));
     }
 
     if (!boss.wasInterrupted() && params->transfere_attributs) {
@@ -1353,7 +1342,7 @@ static void VDB_depuis_fichier_impl(ContexteKuri *ctx,
             }
         }
 
-        exporte_grille_vdb(ctx, flux_sortie_grille, grille, nom_grille);
+        outils::exporte_grille_vdb(ctx, flux_sortie_grille, grille, nom_grille);
     }
     fichier.close();
 

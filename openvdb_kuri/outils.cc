@@ -28,6 +28,8 @@
 
 #include "Géométrie3D/ipa.h"
 
+#include "InterfaceCKuri/contexte_kuri.hh"
+
 #include "grille_vdb.hh"
 #include "ipa_openvdb.h"
 
@@ -73,6 +75,17 @@ std::vector<GrilleVDB *> grilles_depuis_iteratrice(IteratriceGrillesVDB &iteratr
     }
 
     return resultat;
+}
+
+void exporte_grille_vdb(ContexteKuri *ctx,
+                        ExportriceGrilles *exportrice,
+                        openvdb::v9_0::GridBase::Ptr grille_vdb,
+                        std::string nom)
+{
+    grille_vdb->setName(nom);
+    GrilleVDB *grille = kuri_loge<GrilleVDB>(ctx);
+    grille->grid = grille_vdb;
+    exportrice->ajoute_grille(exportrice->donnees, grille);
 }
 
 }  // namespace outils
@@ -251,7 +264,7 @@ bool AdaptriceMaillageVDB::groupePolygonePossedePoint(const void *poignee_groupe
     return this->groupe_polygone_possede_point(poignee_groupe, index);
 }
 
-tbb::blocked_range<long> AdaptriceMaillageVDB::plagePoint() const
+PlageDonnees AdaptriceMaillageVDB::plagePoint(long decalage) const
 {
-    return tbb::blocked_range<long>(0, static_cast<long>(pointCount()));
+    return PlageDonnees(decalage, static_cast<long>(pointCount()));
 }

@@ -38,6 +38,8 @@
 
 struct AccesseuseChaine;
 struct Interruptrice;
+struct ContexteKuri;
+struct ExportriceGrilles;
 struct GrilleVDB;
 struct IteratriceGrillesVDB;
 
@@ -48,6 +50,11 @@ std::string enchaine(std::vector<std::string> const &chaines, std::string const 
 std::string chaine_depuis_accesseuse(AccesseuseChaine *accesseuse);
 
 std::vector<GrilleVDB *> grilles_depuis_iteratrice(IteratriceGrillesVDB &iteratrice);
+
+void exporte_grille_vdb(ContexteKuri *ctx,
+                        ExportriceGrilles *exportrice,
+                        openvdb::GridBase::Ptr grille_vdb,
+                        std::string nom);
 
 }  // namespace outils
 
@@ -82,6 +89,13 @@ struct InterruptriceVDB {
 };
 
 /* *********************************************************************** */
+
+using PlageDonnees = tbb::blocked_range<long>;
+
+inline bool est_valide(const PlageDonnees plage)
+{
+    return plage.begin() <= plage.end();
+}
 
 // interface pour OpenVDB
 class AdaptriceMaillageVDB : public AdaptriceMaillage {
@@ -133,7 +147,7 @@ class AdaptriceMaillageVDB : public AdaptriceMaillage {
 
     bool groupePolygonePossedePoint(const void *poignee_groupe, long index) const;
 
-    tbb::blocked_range<long> plagePoint() const;
+    PlageDonnees plagePoint(long decalage = 0) const;
 };
 
 /* *********************************************************************** */
