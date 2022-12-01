@@ -591,6 +591,8 @@ set(INCLUSIONS
 )
 
 set(BIBLIOTHEQUES
+    openvdb
+    tbb
 )
 
 set(SOURCES
