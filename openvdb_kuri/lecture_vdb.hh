@@ -7,6 +7,7 @@ struct ContexteKuri;
 struct EnveloppeContexteEvaluation;
 struct ExportriceGrilles;
 struct InterruptriceVDB;
+struct ParametresEcritureVDB;
 struct ParametresLectureVDB;
 
 namespace kvdb {
@@ -17,4 +18,8 @@ void lecture_vdb(ContexteKuri *ctx,
                  ExportriceGrilles *flux_sortie_grille,
                  InterruptriceVDB &boss);
 
-}
+void écriture_vdb(EnveloppeContexteEvaluation &ctx_eval,
+                  ParametresEcritureVDB *params,
+                  InterruptriceVDB &boss);
+
+}  // namespace kvdb

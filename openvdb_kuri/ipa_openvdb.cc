@@ -296,3 +296,28 @@ void VDB_depuis_fichier(struct ContexteKuri *ctx,
 }
 
 /** \} */
+
+/* ------------------------------------------------------------------------- */
+/** \name Écriture de fichier .vdb
+ * \{ */
+
+void VDB_ecris_fichier(struct ContexteEvaluation *ctx_eval,
+                       struct ParametresEcritureVDB *params,
+                       struct Interruptrice *interruptrice)
+{
+    InterruptriceVDB boss{interruptrice};
+    EnveloppeContexteEvaluation ctx_eval_ = EnveloppeContexteEvaluation::enveloppe(ctx_eval);
+
+    try {
+        kvdb::écriture_vdb(ctx_eval_, params, boss);
+    }
+    catch (std::exception &e) {
+        ctx_eval_.rapporteErreur(e.what());
+    }
+
+    if (boss.wasInterrupted()) {
+        ctx_eval_.rapporteErreur("processus interrompu");
+    }
+}
+
+/** \} */

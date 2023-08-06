@@ -224,6 +224,50 @@ void VDB_depuis_fichier(struct ContexteKuri *ctx,
                         struct ExportriceGrilles *flux_sortie_grille,
                         struct Interruptrice *interruptrice);
 
+/* ------------------------------------------------------------------------- */
+/** \name Écriture de fichier .vdb
+ * \{ */
+
+enum MethodeCompressionVDB {
+    METHODE_COMPRESSION_VDB_AUCUNE,
+    METHODE_COMPRESSION_VDB_ZIP,
+    METHODE_COMPRESSION_VDB_BLOSC,
+};
+
+struct ParametresEcritureVDB {
+    /** Chemin vers le fichier de sortie. */
+    struct AccesseuseChaine *nom_fichier_sortie;
+
+    /** Chaine pour définir un attribut dans le fichier ayant le nom de l'application ayant créée
+     * ledit fichier. */
+    struct AccesseuseChaine *nom_application;
+
+    /** Ensemble des grilles à écrire. */
+    struct IteratriceGrillesVDB *grilles;
+
+    /** Définis la méthode de compression. ZIP est lent mais comprime très bien. Blosc est rapide
+     * et comprime bien. Pour la plupart des cas, Blosc est recommandé. */
+    enum MethodeCompressionVDB methode_compression;
+
+    /** Pour les grilles appartenant à ce groupe, les valeurs scalaires ou vectorielles en point
+     * flottant seront écrites en 16-bit. Si aucune grille n'est présente dans ce groupe, les
+     * grilles seront écrites selon leurs propres paramètres de précision. Les grilles ici doivent
+     * aussi se trouver dans les grilles à écrire. */
+    struct IteratriceGrillesVDB *grilles_precision_16_bit;
+
+    /** Pour les grilles appartenant à ce groupe, les valeurs scalaires ou vectorielles en point
+     * flottant seront écrites en 32-bit. Si aucune grille n'est présente dans ce groupe, les
+     * grilles seront écrites selon leurs propres paramètres de précision. Les grilles ici doivent
+     * aussi se trouver dans les grilles à écrire. */
+    struct IteratriceGrillesVDB *grilles_precision_32_bit;
+};
+
+void VDB_ecris_fichier(struct ContexteEvaluation *ctx_eval,
+                       struct ParametresEcritureVDB *params,
+                       struct Interruptrice *interruptrice);
+
+/** \} */
+
 /* *************************************************************************** */
 /* Distribution de points.
  */

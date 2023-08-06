@@ -33,6 +33,9 @@ std::string enchaine(std::vector<std::string> const &chaines, std::string const 
 
 std::string chaine_depuis_accesseuse(AccesseuseChaine *accesseuse)
 {
+    if (!accesseuse) {
+        return "";
+    }
     char *nom = nullptr;
     long taille = 0;
     if (accesseuse->accede_chaine) {
