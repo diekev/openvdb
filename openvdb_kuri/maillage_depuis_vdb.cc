@@ -79,7 +79,7 @@ static void ajoute_champs_adaptivite(EnveloppeContexteEvaluation &ctx_eval,
     }
 
     if (!params->grille_champs_adaptivite->grid) {
-        ctx_eval.rapporteAvertissement("Aucune grille pour le masque de surface");
+        ctx_eval.rapporteAvertissement("Aucune grille pour le champs d'adaptivité");
         return;
     }
 
