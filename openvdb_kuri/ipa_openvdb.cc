@@ -3,19 +3,9 @@
 
 #include "ipa_openvdb.h"
 
-#include <list>
-
-#include "openvdb/math/Ray.h"
 #include "openvdb/tools/Dense.h"
-#include "openvdb/tools/LevelSetUtil.h"
-#include "openvdb/tools/Mask.h"  // pour tools::interiorMask()
-#include "openvdb/tools/MeshToVolume.h"
-#include "openvdb/tools/Morphology.h"
-#include "openvdb/tools/ParticlesToLevelSet.h"
-#include "openvdb/tools/VolumeToMesh.h"
 
 #include "../InterfaceCKuri/contexte_kuri.hh"
-#include "Géométrie3D/ipa.h"
 
 #include "grille_vdb.hh"
 #include "lecture_vdb.hh"
@@ -170,9 +160,9 @@ void VDB_donne_tampon_dense(ContexteKuri *ctx,
 
     float *r_data = kuri_loge_tableau<float>(ctx, bbox.volume());
 
-    auto dense = openvdb::tools::Dense<float, openvdb::tools::LayoutXYZ>(bbox, r_data);
+    auto dense = tools::Dense<float, tools::LayoutXYZ>(bbox, r_data);
 
-    openvdb::tools::copyToDense(*openvdb::gridConstPtrCast<openvdb::FloatGrid>(grid), dense);
+    tools::copyToDense(*gridConstPtrCast<FloatGrid>(grid), dense);
 
     r_donnees->donnees = r_data;
     r_donnees->taille_donnees = bbox.volume();
