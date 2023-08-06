@@ -602,6 +602,7 @@ set(SOURCES
     openvdb_kuri/maillage_depuis_vdb.cc
     openvdb_kuri/outils.cc
     openvdb_kuri/points_depuis_vdb.cc
+    openvdb_kuri/spheres_depuis_vdb.cc
     openvdb_kuri/vdb_depuis_maillage.cc
     openvdb_kuri/vdb_depuis_points.cc
 
@@ -611,6 +612,7 @@ set(SOURCES
     openvdb_kuri/maillage_depuis_vdb.hh
     openvdb_kuri/outils.hh
     openvdb_kuri/points_depuis_vdb.hh
+    openvdb_kuri/spheres_depuis_vdb.hh
     openvdb_kuri/vdb_depuis_maillage.hh
     openvdb_kuri/vdb_depuis_points.hh
 

@@ -397,6 +397,135 @@ void VDB_detruit_tampon_dense(struct ContexteKuri *ctx,
 
 /** \} */
 
+/* ------------------------------------------------------------------------- */
+/** \name Génération de sphères.
+ * \{ */
+
+struct ParametresSphereDepuisVDB {
+    /** Ensemble de grilles à partir desquelles générer les sphères. */
+    struct IteratriceGrillesVDB *grilles;
+
+    /**
+     * La valeur des voxels qui détermine la surface du volume.
+     * Zéro fonctionne pour les champs de distance signée, tandis que les gaz requierent une petite
+     * valeur positive (0.5 est une bonne valeur initiale pour ceux-ci).
+     *
+     * @défaut 0.0
+     * @min -1.0
+     * @max 1.0 */
+    float valeur_isometrique;
+
+    /**
+     * Définis si les rayons des sphères sont en unités mondiales si vrai, ou en nombre de voxel
+     * si faux. */
+    bool utilise_unites_mondiales;
+
+    /** Définis si le rayon minimum doit être utilisé. */
+    bool utilise_rayon_minimum;
+
+    /**
+     * Le rayon de la plus petite sphère possible. Si désactivé, des sphères de tout rayon
+     * supérieur à zéro peuvent être générées.
+     *
+     * @défaut 0.0
+     * @min 1e-5
+     * @max 2.0  */
+    float rayon_minimum;
+
+    /** Définis si le rayon maximum doit être utilisé. */
+    bool utilise_rayon_maximum;
+
+    /**
+     * Le rayon de la plus grande sphère possible. Si désactivé, des sphères arbitrairement
+     * grandes peuvent être générées.
+     *
+     * @défaut 100.0
+     * @min 1e-5
+     * @max 100.0 */
+    float rayon_maximum;
+
+    /** Définis si le nombre minimum de sphères doit être utilisé. */
+    bool utilise_nombre_minimum;
+
+    /**
+     * Le nombre minimum de sphères à générer. Si désactivé, les VDBs les très petit peuvent ne
+     * pas générer de sphères.
+     * NOTE: __nombre_minimum__ est prioritaire par rapport à __rayon_minimum__. Des sphères plus
+     * petites que __rayon_minimum__ peuvent être générées afin de garantir que le compte minimal
+     * de sphère est atteint.
+     *
+     * @défaut 1
+     * @min 0
+     * @max 100 */
+    int nombre_minimum;
+
+    /**
+     * Définis si le nombre maximum de sphères doit être utilisé. */
+    bool utilise_nombre_maximum;
+
+    /**
+     * Le nombre maximum de sphères à générer. Si désactivé, permet de générer au plus un nombre
+     * de sphères égal à __compte_de_point__.
+     *
+     * @défaut 50
+     * @min 1
+     * @max 100 */
+    int nombre_maximum;
+
+    /**
+     * Le nombre de candidats pour les centres des sphères à considerer. Augmenter ce compte
+     * permet d'augmenter les chances de trouver une taille optimale pour les sphères.
+     *
+     * @défaut 10000
+     * @min 1000
+     * @max 50000 */
+    int compte_de_points;
+
+    /**
+     * Si activé, autorise les sphères à se superposer ou s'intersecter entre elles.
+     */
+    bool permet_superposition;
+
+    /**
+     * Si activé, ajoute un attribut un attribut à chaque sphère qui indique l'identifiant de la
+     * grille VDB de ladite sphère provient.
+     */
+    bool ajoute_attribut_id;
+
+    /**
+     * Si activé, ajoute un attribut de rayon à chaque sphère qui indique pour chaque sphère son
+     * rayon.
+     */
+    bool ajoute_attribut_rayon;
+};
+
+/** Structure de rappels pour recevoir les sphères générées. */
+struct AdaptriceSortieSpheres {
+    /** Ajoute un sphère à la sortie, et retourne l'index de celle-ci. */
+    int (*ajoute_sphere)(
+        struct AdaptriceSortieSpheres *adaptrice, float x, float y, float z, float rayon);
+
+    /** Définis l'attribut de rayon pour la sphère à l'index donnée. Cet index provient du rappel
+     * `ajoute_sphere`. */
+    void (*definis_attribut_rayon)(struct AdaptriceSortieSpheres *adaptrice,
+                                   int index,
+                                   float rayon);
+
+    /** Définis l'attribut d'identifiant pour la sphère à l'index donnée. Cet index provient du
+     * rappel `ajoute_sphere`. L'identifiant est l'index, commençant à 1, de la grille ayant
+     * générée la sphère. */
+    void (*definis_attribut_identifiant)(struct AdaptriceSortieSpheres *adaptrice,
+                                         int index,
+                                         int identifiant);
+};
+
+void VDB_spheres_depuis_vdb(struct ContexteEvaluation *ctx_eval,
+                            struct ParametresSphereDepuisVDB *params,
+                            struct AdaptriceSortieSpheres *sortie_spheres,
+                            struct Interruptrice *interruptrice);
+
+/** \} */
+
 #ifdef __cplusplus
 }
 #endif

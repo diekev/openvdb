@@ -12,6 +12,7 @@
 #include "maillage_depuis_vdb.hh"
 #include "outils.hh"
 #include "points_depuis_vdb.hh"
+#include "spheres_depuis_vdb.hh"
 #include "vdb_depuis_maillage.hh"
 #include "vdb_depuis_points.hh"
 
@@ -317,6 +318,28 @@ void VDB_ecris_fichier(struct ContexteEvaluation *ctx_eval,
 
     if (boss.wasInterrupted()) {
         ctx_eval_.rapporteErreur("processus interrompu");
+    }
+}
+
+/** \} */
+
+/* ------------------------------------------------------------------------- */
+/** \name Génération de sphères.
+ * \{ */
+
+void VDB_spheres_depuis_vdb(struct ContexteEvaluation *ctx_eval,
+                            struct ParametresSphereDepuisVDB *params,
+                            struct AdaptriceSortieSpheres *sortie_spheres,
+                            struct Interruptrice *interruptrice)
+{
+    InterruptriceVDB boss{interruptrice};
+    EnveloppeContexteEvaluation ctx_eval_ = EnveloppeContexteEvaluation::enveloppe(ctx_eval);
+
+    try {
+        kvdb::sphères_depuis_vdb(ctx_eval_, params, sortie_spheres, boss);
+    }
+    catch (std::exception &e) {
+        ctx_eval_.rapporteErreur(e.what());
     }
 }
 
