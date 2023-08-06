@@ -92,6 +92,16 @@ static void ajoute_champs_adaptivite(EnveloppeContexteEvaluation &ctx_eval,
     mesher.setSpatialAdaptivity(grille);
 }
 
+enum {
+    POLYGONE_INTERNE = 0,
+    POLYGONE_INTERNE_SUR_COUTURE = 1,
+    POLYGONE_SUPERFICIEL = 2,
+    POLYGONE_SUPERFICIEL_SUR_COUTURE = 3,
+
+    NOMBRE_TYPE_POLYGONE = 4,
+};
+
+/* Convertis les drapeaux du polygone en une valeur de l'énumération ci-dessus. */
 static inline int convertis_drapeaux_polygone(char drapeau_vdb)
 {
     constexpr char est_externe = char(tools::POLYFLAG_EXTERIOR);
@@ -122,12 +132,8 @@ void copyMesh(AdaptriceMaillageVDB &maillage, tools::VolumeToMesh &mesher, const
     /* Exporte les polygones. */
     tools::PolygonPoolList &polygonPoolList = mesher.polygonPoolList();
 
-    // index 0 --> interior, not on seam
-    // index 1 --> interior, on seam
-    // index 2 --> surface,  not on seam
-    // index 3 --> surface,  on seam
-    long nquads[4] = {0, 0, 0, 0};
-    long ntris[4] = {0, 0, 0, 0};
+    long nquads[NOMBRE_TYPE_POLYGONE] = {0, 0, 0, 0};
+    long ntris[NOMBRE_TYPE_POLYGONE] = {0, 0, 0, 0};
     for (size_t n = 0, N = mesher.polygonPoolListSize(); n < N; ++n) {
         const tools::PolygonPool &polygons = polygonPoolList[n];
         for (size_t i = 0, I = polygons.numQuads(); i < I; ++i) {
@@ -140,17 +146,17 @@ void copyMesh(AdaptriceMaillageVDB &maillage, tools::VolumeToMesh &mesher, const
         }
     }
 
-    long nverts[4] = {nquads[0] * 4 + ntris[0] * 3,
-                      nquads[1] * 4 + ntris[1] * 3,
-                      nquads[2] * 4 + ntris[2] * 3,
-                      nquads[3] * 4 + ntris[3] * 3};
-    std::vector<int> verts[4];
+    long nverts[NOMBRE_TYPE_POLYGONE] = {nquads[0] * 4 + ntris[0] * 3,
+                                         nquads[1] * 4 + ntris[1] * 3,
+                                         nquads[2] * 4 + ntris[2] * 3,
+                                         nquads[3] * 4 + ntris[3] * 3};
+    std::vector<int> verts[NOMBRE_TYPE_POLYGONE];
     for (int flags = 0; flags < 4; ++flags) {
         verts[flags].resize(nverts[flags]);
     }
 
-    long iquad[4] = {0, 0, 0, 0};
-    long itri[4] = {nquads[0] * 4, nquads[1] * 4, nquads[2] * 4, nquads[3] * 4};
+    long iquad[NOMBRE_TYPE_POLYGONE] = {0, 0, 0, 0};
+    long itri[NOMBRE_TYPE_POLYGONE] = {nquads[0] * 4, nquads[1] * 4, nquads[2] * 4, nquads[3] * 4};
 
     for (size_t n = 0, N = mesher.polygonPoolListSize(); n < N; ++n) {
         const tools::PolygonPool &polygons = polygonPoolList[n];
