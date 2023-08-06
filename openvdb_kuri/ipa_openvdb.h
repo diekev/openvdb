@@ -31,8 +31,8 @@ enum TypeVolume {
 
 struct GrilleVDB *VDB_copie_grille(struct ContexteKuri *ctx, struct GrilleVDB *grille);
 void VDB_detruit_grille(struct ContexteKuri *ctx, struct GrilleVDB *grille);
-void VDB_accede_nom_grille(struct GrilleVDB *grille, const char **nom, long *taille);
-void VDB_mute_nom_grille(struct GrilleVDB *grille, const char *nom, long taille);
+void VDB_donne_nom_grille(struct GrilleVDB *grille, const char **nom, long *taille);
+void VDB_definis_nom_grille(struct GrilleVDB *grille, const char *nom, long taille);
 enum TypeVolume VDB_type_volume_pour_grille(struct GrilleVDB *grille);
 
 struct ExportriceGrilles {
@@ -298,6 +298,21 @@ void VDB_distribue_points(struct ContexteKuri *ctx,
                           struct ContexteEvaluation *ctx_eval,
                           struct ParametresPointsDepuisVDB *params,
                           struct Interruptrice *interruptrice);
+
+struct ParamsVDBDepuisPoints {
+    float poids_rayon;
+    float poids_velocity;
+    bool cree_des_trainees;
+    bool transfere_attributs;
+
+    struct AccesseuseAttribut *acces_attributs_points;
+};
+
+void VDB_depuis_points(struct ContexteKuri *ctx,
+                       struct ContexteEvaluation *ctx_eval,
+                       struct AdaptricePoints *adaptrice,
+                       struct ParamsVDBDepuisPoints *params,
+                       struct Interruptrice *interruptrice);
 
 /* ------------------------------------------------------------------------- */
 /** \name Dimension mondiale d'une grille.
