@@ -299,6 +299,45 @@ void VDB_distribue_points(struct ContexteKuri *ctx,
                           struct ParametresPointsDepuisVDB *params,
                           struct Interruptrice *interruptrice);
 
+/* ------------------------------------------------------------------------- */
+/** \name Dimension mondiale d'une grille.
+ * \{ */
+
+struct DimensionMondeVDB {
+    float min_x;
+    float min_y;
+    float min_z;
+
+    float max_x;
+    float max_y;
+    float max_z;
+};
+
+void VDB_donne_dimension_monde(struct GrilleVDB *grille, struct DimensionMondeVDB *r_dimension);
+
+/** \} */
+
+/* ------------------------------------------------------------------------- */
+/** \name Conversion vers tampon dense.
+ * \{ */
+
+struct DonneesConversionVersDense {
+    float *donnees;
+    int taille_donnees;
+    int dim_x;
+    int dim_y;
+    int dim_z;
+};
+
+void VDB_donne_tampon_dense(struct ContexteKuri *ctx,
+                            struct GrilleVDB *grille,
+                            struct DonneesConversionVersDense *r_donnees);
+
+void VDB_detruit_tampon_dense(struct ContexteKuri *ctx,
+                              struct DonneesConversionVersDense *donnees);
+
+/** \} */
+
 #ifdef __cplusplus
 }
 #endif

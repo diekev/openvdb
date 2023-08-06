@@ -6,6 +6,7 @@
 #include <list>
 
 #include "openvdb/math/Ray.h"
+#include "openvdb/tools/Dense.h"
 #include "openvdb/tools/LevelSetUtil.h"
 #include "openvdb/tools/Mask.h"  // pour tools::interiorMask()
 #include "openvdb/tools/MeshToVolume.h"
@@ -62,6 +63,88 @@ void VDB_mute_nom_grille(struct GrilleVDB *grille, const char *nom, long taille)
     const auto nouveau_nom = std::string(nom, static_cast<size_t>(taille));
     grille->grid->setName(nouveau_nom);
 }
+
+/* ------------------------------------------------------------------------- */
+/** \name Dimension mondiale d'une grille.
+ * \{ */
+
+void VDB_donne_dimension_monde(GrilleVDB *grille, DimensionMondeVDB *r_dimension)
+{
+    if (!grille || !grille->grid || !r_dimension) {
+        if (r_dimension) {
+            r_dimension->min_x = 0.0f;
+            r_dimension->min_y = 0.0f;
+            r_dimension->min_z = 0.0f;
+            r_dimension->max_x = 0.0f;
+            r_dimension->max_y = 0.0f;
+            r_dimension->max_z = 0.0f;
+        }
+        return;
+    }
+
+    auto const &grid = grille->grid;
+    auto const &xform = grid->transform();
+
+    auto const bbox = grid->evalActiveVoxelBoundingBox();
+    auto const min_monde = xform.indexToWorld(bbox.min());
+    auto const max_monde = xform.indexToWorld(bbox.max());
+
+    r_dimension->min_x = min_monde.x();
+    r_dimension->min_y = min_monde.y();
+    r_dimension->min_z = min_monde.z();
+
+    r_dimension->max_x = max_monde.x();
+    r_dimension->max_y = max_monde.y();
+    r_dimension->max_z = max_monde.z();
+}
+
+/** \} */
+
+/* ------------------------------------------------------------------------- */
+/** \name Conversion vers tampon dense.
+ * \{ */
+
+void VDB_donne_tampon_dense(ContexteKuri *ctx,
+                            GrilleVDB *grille,
+                            DonneesConversionVersDense *r_donnees)
+{
+    if (!grille || !grille->grid || !r_donnees) {
+        if (r_donnees) {
+            r_donnees->donnees = nullptr;
+            r_donnees->taille_donnees = 0;
+            r_donnees->dim_x = 0;
+            r_donnees->dim_y = 0;
+            r_donnees->dim_z = 0;
+        }
+        return;
+    }
+
+    auto const &grid = grille->grid;
+    auto bbox = grid->evalActiveVoxelBoundingBox();
+
+    float *r_data = kuri_loge_tableau<float>(ctx, bbox.volume());
+
+    auto dense = openvdb::tools::Dense<float, openvdb::tools::LayoutXYZ>(bbox, r_data);
+
+    openvdb::tools::copyToDense(*openvdb::gridConstPtrCast<openvdb::FloatGrid>(grid), dense);
+
+    r_donnees->donnees = r_data;
+    r_donnees->taille_donnees = bbox.volume();
+    r_donnees->dim_x = bbox.dim().x();
+    r_donnees->dim_y = bbox.dim().y();
+    r_donnees->dim_z = bbox.dim().z();
+}
+
+void VDB_detruit_tampon_dense(ContexteKuri *ctx, DonneesConversionVersDense *donnees)
+{
+    if (!donnees) {
+        return;
+    }
+
+    kuri_déloge_tableau(ctx, donnees->donnees, donnees->taille_donnees);
+}
+
+/** \} */
 
 TypeVolume VDB_type_volume_pour_grille(GrilleVDB *grille)
 {
