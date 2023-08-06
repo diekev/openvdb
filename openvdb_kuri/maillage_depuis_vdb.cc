@@ -92,6 +92,13 @@ static void ajoute_champs_adaptivite(EnveloppeContexteEvaluation &ctx_eval,
     mesher.setSpatialAdaptivity(grille);
 }
 
+static inline int convertis_drapeaux_polygone(char drapeau_vdb)
+{
+    constexpr char est_externe = char(tools::POLYFLAG_EXTERIOR);
+    constexpr char est_sur_couture = char(tools::POLYFLAG_FRACTURE_SEAM);
+    return (((drapeau_vdb & est_externe) != 0) << 1) | ((drapeau_vdb & est_sur_couture) != 0);
+}
+
 void copyMesh(AdaptriceMaillageVDB &maillage, tools::VolumeToMesh &mesher, const char *gridName)
 {
     /* Exporte les points. */
@@ -115,9 +122,6 @@ void copyMesh(AdaptriceMaillageVDB &maillage, tools::VolumeToMesh &mesher, const
     /* Exporte les polygones. */
     tools::PolygonPoolList &polygonPoolList = mesher.polygonPoolList();
 
-    const char exteriorFlag = char(tools::POLYFLAG_EXTERIOR);
-    const char seamLineFlag = char(tools::POLYFLAG_FRACTURE_SEAM);
-
     // index 0 --> interior, not on seam
     // index 1 --> interior, on seam
     // index 2 --> surface,  not on seam
@@ -127,13 +131,11 @@ void copyMesh(AdaptriceMaillageVDB &maillage, tools::VolumeToMesh &mesher, const
     for (size_t n = 0, N = mesher.polygonPoolListSize(); n < N; ++n) {
         const tools::PolygonPool &polygons = polygonPoolList[n];
         for (size_t i = 0, I = polygons.numQuads(); i < I; ++i) {
-            int flags = (((polygons.quadFlags(i) & exteriorFlag) != 0) << 1) |
-                        ((polygons.quadFlags(i) & seamLineFlag) != 0);
+            int flags = convertis_drapeaux_polygone(polygons.quadFlags(i));
             ++nquads[flags];
         }
         for (size_t i = 0, I = polygons.numTriangles(); i < I; ++i) {
-            int flags = (((polygons.triangleFlags(i) & exteriorFlag) != 0) << 1) |
-                        ((polygons.triangleFlags(i) & seamLineFlag) != 0);
+            int flags = convertis_drapeaux_polygone(polygons.triangleFlags(i));
             ++ntris[flags];
         }
     }
@@ -156,8 +158,7 @@ void copyMesh(AdaptriceMaillageVDB &maillage, tools::VolumeToMesh &mesher, const
         // Copy quads
         for (size_t i = 0, I = polygons.numQuads(); i < I; ++i) {
             const Vec4I &quad = polygons.quad(i);
-            int flags = (((polygons.quadFlags(i) & exteriorFlag) != 0) << 1) |
-                        ((polygons.quadFlags(i) & seamLineFlag) != 0);
+            int flags = convertis_drapeaux_polygone(polygons.quadFlags(i));
             verts[flags][iquad[flags]++] = quad[0] + decalage_point;
             verts[flags][iquad[flags]++] = quad[1] + decalage_point;
             verts[flags][iquad[flags]++] = quad[2] + decalage_point;
@@ -167,8 +168,7 @@ void copyMesh(AdaptriceMaillageVDB &maillage, tools::VolumeToMesh &mesher, const
         // Copy triangles (adaptive mesh)
         for (size_t i = 0, I = polygons.numTriangles(); i < I; ++i) {
             const Vec3I &triangle = polygons.triangle(i);
-            int flags = (((polygons.triangleFlags(i) & exteriorFlag) != 0) << 1) |
-                        ((polygons.triangleFlags(i) & seamLineFlag) != 0);
+            int flags = convertis_drapeaux_polygone(polygons.triangleFlags(i));
             verts[flags][itri[flags]++] = triangle[0] + decalage_point;
             verts[flags][itri[flags]++] = triangle[1] + decalage_point;
             verts[flags][itri[flags]++] = triangle[2] + decalage_point;
